@@ -1,5 +1,20 @@
 export type MonitorStatus = "idle" | "connecting" | "running" | "stopping" | "error";
 
+export const METER_KEYS = [
+  "frequency_hz",
+  "phase_voltage_v1",
+  "phase_voltage_v2",
+  "phase_voltage_v3",
+  "line_voltage_v12",
+  "current_i1",
+  "current_i2",
+  "current_i3",
+  "active_power_p1",
+  "power_factor_pf1",
+] as const;
+
+export type MeterKey = (typeof METER_KEYS)[number];
+
 export interface MeterValues {
   frequency_hz: number | null;
   phase_voltage_v1: number | null;
@@ -21,6 +36,11 @@ export interface LiveUpdate {
   errorCount: number;
   liveHz: number;
   message: string;
+}
+
+export interface GraphBuffer {
+  times: number[];
+  series: Record<MeterKey, Array<number | null>>;
 }
 
 export interface AppConfig {
@@ -51,6 +71,75 @@ export const DEFAULT_CONFIG: AppConfig = {
   retries: 1,
 };
 
+export interface SessionRecord {
+  sessionId: string;
+  startedAt: string;
+  endedAt: string | null;
+  status: string;
+  stopReason: string | null;
+  sampleCount: number;
+  errorCount: number;
+  reportPath: string | null;
+  config: AppConfig;
+}
+
+export interface SessionSummary {
+  sessionId: string;
+  startedAt: string;
+  endedAt: string;
+  sampleCount: number;
+  errorCount: number;
+  stopReason: string;
+  status: string;
+  databasePath: string;
+  reportPath: string | null;
+}
+
+export interface MonitorLog {
+  timestampMs: number;
+  message: string;
+}
+
+export interface MonitorFailure {
+  kind: "connection" | "runtime";
+  message: string;
+  sessionId: string | null;
+}
+
+export interface MeterReading {
+  key: MeterKey;
+  label: string;
+  address: number;
+  unit: string;
+  responded: boolean;
+  ok: boolean;
+  message: string;
+  registers: number[] | null;
+  value: number | null;
+}
+
+export interface MeterSnapshot {
+  port: string;
+  detectedPorts: string[];
+  connected: boolean;
+  anyMeterReplied: boolean;
+  allReadsOk: boolean;
+  message: string;
+  readings: MeterReading[];
+  values: MeterValues;
+  summary: string;
+}
+
+export interface StartMonitorResult {
+  sessionId: string;
+  databasePath: string;
+}
+
+export interface MonitorRuntimeState {
+  running: boolean;
+  sessionId: string | null;
+}
+
 export function emptyValues(): MeterValues {
   return {
     frequency_hz: null,
@@ -63,6 +152,28 @@ export function emptyValues(): MeterValues {
     current_i3: null,
     active_power_p1: null,
     power_factor_pf1: null,
+  };
+}
+
+export function emptyGraph(): GraphBuffer {
+  return {
+    times: [],
+    series: Object.fromEntries(METER_KEYS.map((key) => [key, []])) as unknown as GraphBuffer["series"],
+  };
+}
+
+export function appendGraphPoint(graph: GraphBuffer, update: LiveUpdate, maximum = 1800): GraphBuffer {
+  const times = [...graph.times, update.timestampMs / 1000];
+  const series = Object.fromEntries(
+    METER_KEYS.map((key) => [key, [...graph.series[key], update.values[key]]]),
+  ) as unknown as GraphBuffer["series"];
+  if (times.length <= maximum) return { times, series };
+  const start = times.length - maximum;
+  return {
+    times: times.slice(start),
+    series: Object.fromEntries(
+      METER_KEYS.map((key) => [key, series[key].slice(start)]),
+    ) as unknown as GraphBuffer["series"],
   };
 }
 

@@ -1,9 +1,10 @@
-/**
- * Tauri IPC bridge for Accuenergy Metering.
- * Commands are stubbed until the Rust monitor module is wired (see docs/PORT_PLAN.md).
- */
-
-import type { AppConfig } from "@/features/live/types";
+import type {
+  AppConfig,
+  MeterSnapshot,
+  MonitorRuntimeState,
+  SessionRecord,
+  StartMonitorResult,
+} from "@/features/live/types";
 
 export interface PortInfo {
   name: string;
@@ -18,47 +19,68 @@ export interface AppPaths {
   exports: string;
 }
 
+async function invokeCommand<Result>(command: string, args?: Record<string, unknown>): Promise<Result> {
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke<Result>(command, args);
+}
+
 export async function isTauriRuntime(): Promise<boolean> {
   try {
-    const { invoke } = await import("@tauri-apps/api/core");
-    await invoke("ping");
+    await invokeCommand<string>("ping");
     return true;
   } catch {
     return false;
   }
 }
 
-export async function listSerialPorts(): Promise<PortInfo[]> {
-  const { invoke } = await import("@tauri-apps/api/core");
-  return invoke<PortInfo[]>("list_serial_ports");
+export function listSerialPorts(): Promise<PortInfo[]> {
+  return invokeCommand<PortInfo[]>("list_serial_ports");
 }
 
-export async function getConfig(): Promise<AppConfig> {
-  const { invoke } = await import("@tauri-apps/api/core");
-  return invoke<AppConfig>("get_config");
+export function getConfig(): Promise<AppConfig> {
+  return invokeCommand<AppConfig>("get_config");
 }
 
-export async function saveConfig(config: AppConfig): Promise<void> {
-  const { invoke } = await import("@tauri-apps/api/core");
-  await invoke("save_config", { config });
+export function saveConfig(config: AppConfig): Promise<AppConfig> {
+  return invokeCommand<AppConfig>("save_config", { config });
 }
 
-export async function getAppPaths(): Promise<AppPaths> {
-  const { invoke } = await import("@tauri-apps/api/core");
-  return invoke<AppPaths>("get_app_paths");
+export function getAppPaths(): Promise<AppPaths> {
+  return invokeCommand<AppPaths>("get_app_paths");
 }
 
-export async function testRs485(): Promise<string> {
-  const { invoke } = await import("@tauri-apps/api/core");
-  return invoke<string>("test_rs485");
+export function testRs485(): Promise<MeterSnapshot> {
+  return invokeCommand<MeterSnapshot>("test_rs485");
 }
 
-export async function startMonitor(): Promise<void> {
-  const { invoke } = await import("@tauri-apps/api/core");
-  await invoke("start_monitor");
+export function startMonitor(): Promise<StartMonitorResult> {
+  return invokeCommand<StartMonitorResult>("start_monitor");
 }
 
-export async function stopMonitor(): Promise<void> {
-  const { invoke } = await import("@tauri-apps/api/core");
-  await invoke("stop_monitor");
+export function stopMonitor(): Promise<string | null> {
+  return invokeCommand<string | null>("stop_monitor");
+}
+
+export function getMonitorState(): Promise<MonitorRuntimeState> {
+  return invokeCommand<MonitorRuntimeState>("get_monitor_state");
+}
+
+export function listSessions(): Promise<SessionRecord[]> {
+  return invokeCommand<SessionRecord[]>("list_sessions");
+}
+
+export function getLatestSession(): Promise<SessionRecord | null> {
+  return invokeCommand<SessionRecord | null>("get_latest_session");
+}
+
+export function generateReport(sessionId: string): Promise<string> {
+  return invokeCommand<string>("generate_report", { sessionId });
+}
+
+export function exportSessionCsv(sessionId: string): Promise<string> {
+  return invokeCommand<string>("export_session_csv", { sessionId });
+}
+
+export function openPath(path: string): Promise<void> {
+  return invokeCommand<void>("open_path", { path });
 }

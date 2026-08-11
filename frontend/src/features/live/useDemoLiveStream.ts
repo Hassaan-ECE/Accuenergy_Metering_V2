@@ -1,19 +1,22 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { emptyValues, type LiveUpdate, type MeterValues, type MonitorStatus } from "./types";
+import {
+  appendGraphPoint,
+  emptyGraph,
+  emptyValues,
+  type GraphBuffer,
+  type LiveUpdate,
+  type MeterValues,
+  type MonitorStatus,
+} from "./types";
 
 const MAX_POINTS = 1800;
-
-interface GraphSeries {
-  times: number[];
-  values: number[];
-}
 
 export function useDemoLiveStream() {
   const [status, setStatus] = useState<MonitorStatus>("idle");
   const [latest, setLatest] = useState<LiveUpdate | null>(null);
   const [values, setValues] = useState<MeterValues>(emptyValues);
-  const [graph, setGraph] = useState<GraphSeries>({ times: [], values: [] });
+  const [graph, setGraph] = useState<GraphBuffer>(emptyGraph);
   const [logLines, setLogLines] = useState<string[]>(["Application ready."]);
   const [sampleCount, setSampleCount] = useState(0);
   const [errorCount, setErrorCount] = useState(0);
@@ -28,13 +31,15 @@ export function useDemoLiveStream() {
   }, []);
 
   const stop = useCallback(() => {
+    let stopped = false;
     if (timerRef.current !== null) {
       window.clearInterval(timerRef.current);
       timerRef.current = null;
+      stopped = true;
     }
     setStatus("idle");
     setLiveHz(0);
-    pushLog("Demo stream stopped.");
+    if (stopped) pushLog("Demo stream stopped.");
   }, [pushLog]);
 
   const start = useCallback(() => {
@@ -45,7 +50,7 @@ export function useDemoLiveStream() {
     countRef.current = 0;
     setSampleCount(0);
     setErrorCount(0);
-    setGraph({ times: [], values: [] });
+    setGraph(emptyGraph());
     setStatus("running");
     pushLog("Demo stream started (no meter attached — synthetic data).");
 
@@ -82,17 +87,7 @@ export function useDemoLiveStream() {
       setValues(nextValues);
       setSampleCount(countRef.current);
       setLiveHz(update.liveHz);
-      setGraph((prev) => {
-        const times = [...prev.times, update.timestampMs / 1000];
-        const freqs = [...prev.values, frequency];
-        if (times.length > MAX_POINTS) {
-          return {
-            times: times.slice(times.length - MAX_POINTS),
-            values: freqs.slice(freqs.length - MAX_POINTS),
-          };
-        }
-        return { times, values: freqs };
-      });
+      setGraph((previous) => appendGraphPoint(previous, update, MAX_POINTS));
     }, 200);
   }, [pushLog]);
 

@@ -7,7 +7,6 @@ import { Button } from "@/shared/components/ui/button";
 
 interface SettingsDialogProps {
   config: AppConfig;
-  open: boolean;
   ports: PortInfo[];
   refreshingPorts: boolean;
   saving: boolean;
@@ -25,7 +24,6 @@ function numberValue(value: string): number {
 
 export function SettingsDialog({
   config,
-  open,
   ports,
   refreshingPorts,
   saving,
@@ -37,27 +35,17 @@ export function SettingsDialog({
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (open) {
-      setDraft(config);
-      setError(null);
-    }
-  }, [config, open]);
-
-  useEffect(() => {
-    if (!open) return;
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape" && !saving) onClose();
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [onClose, open, saving]);
+  }, [onClose, saving]);
 
   const portOptions = useMemo(
     () => ports.map((port) => ({ ...port, label: port.description ? `${port.name} — ${port.description}` : port.name })),
     [ports],
   );
-
-  if (!open) return null;
 
   const update = <Key extends keyof AppConfig>(key: Key, value: AppConfig[Key]) => {
     setDraft((current) => ({ ...current, [key]: value }));
