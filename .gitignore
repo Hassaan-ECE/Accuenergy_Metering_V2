@@ -1,0 +1,36 @@
+# Dependencies / build
+node_modules/
+frontend/dist/
+frontend/node_modules/
+backend/target/
+backend/gen/schemas/
+
+# Locks / tooling
+*.log
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# Local data / secrets
+settings.json
+Data/
+Output/
+Old/
+*.feox
+*.db
+*.db-wal
+*.db-shm
+
+# Signing / release artifacts
+*.sig
+*.exe
+*.msi
+release-support/
+
+# Env
+.env
+.env.*

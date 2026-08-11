@@ -1,0 +1,57 @@
+# Agent notes — Accuenergy Metering
+
+## Workspace
+
+| Path | Role |
+|------|------|
+| `C:\Projects\Active\Accuenergy_Metering` | **Active app** (Tauri / Rust / Bun / React) |
+| `C:\Projects\Active\Accuenergy_Metering_Legacy` | Read-only reference clone of the old Python app |
+| GitHub (legacy) | https://github.com/Hassaan-ECE/Accuenergy_Metering.git |
+
+Read before non-trivial work:
+
+- `docs/LEGACY_ANALYSIS.md` — what the old app did
+- `docs/PORT_PLAN.md` — phases and IPC contract
+
+UI/release conventions: mirror `Inventory_Management` (not its domain).
+
+## Identity
+
+| Item | Value |
+|------|--------|
+| Name | Accuenergy Metering |
+| Package | `accuenergy-metering` `0.1.0` |
+| Tauri id | `com.accuenergy.metering` |
+| Local data (planned) | `%LOCALAPPDATA%\com.accuenergy.metering\` |
+
+## Stack
+
+Tauri 2, React 19, TypeScript, Vite, Tailwind v4, Bun, Rust.  
+Live graphs: **uPlot**. Storage (planned): **SQLite** (not FeOx).  
+Serial (planned): `serialport` + Modbus RTU client.
+
+## Current phase
+
+**Phase 0 scaffold.** Frontend has a demo live stream. Rust commands are stubs except domain decode + config types.  
+Do not claim RS485/Modbus works without a live COM smoke test.
+
+## Commands
+
+```powershell
+bun install
+bun run dev:frontend    # browser-only UI
+bun run desktop         # Tauri dev
+bun run build:frontend
+bun run test
+cd backend; cargo test
+```
+
+## Device defaults (lab-proven in legacy)
+
+COM5 · device ID 1 · 19200 baud · parity N · 1 stop bit · sample 1 Hz · run 24 h
+
+Register map: see `backend/src/domain/meter.rs` and legacy `Code/core/meter.py`.
+
+## Release (later)
+
+Follow Syed PDU-style signed NSIS + S-drive layout. **New updater keypair** for this product — do not reuse Inventory/PDU keys.
