@@ -1,5 +1,6 @@
 mod api;
 mod domain;
+mod paths;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -11,6 +12,7 @@ pub fn run() {
             api::get_config,
             api::save_config,
             api::list_serial_ports,
+            api::get_app_paths,
             api::test_rs485,
             api::start_monitor,
             api::stop_monitor,

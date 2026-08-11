@@ -20,8 +20,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 chrono = { version = "0.4", features = ["serde"] }
 thiserror = "2"
-# Phase 2: serialport + tokio-modbus for real RS485 I/O
-# serialport = "4"
+serialport = "4"
 # tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "macros"] }
 # tokio-modbus = { version = "0.16", default-features = false, features = ["rtu", "rtu-sync"] }
 # rusqlite = { version = "0.32", features = ["bundled"] }

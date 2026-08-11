@@ -10,6 +10,14 @@ export interface PortInfo {
   description?: string;
 }
 
+export interface AppPaths {
+  root: string;
+  settings: string;
+  database: string;
+  reports: string;
+  exports: string;
+}
+
 export async function isTauriRuntime(): Promise<boolean> {
   try {
     const { invoke } = await import("@tauri-apps/api/core");
@@ -33,6 +41,11 @@ export async function getConfig(): Promise<AppConfig> {
 export async function saveConfig(config: AppConfig): Promise<void> {
   const { invoke } = await import("@tauri-apps/api/core");
   await invoke("save_config", { config });
+}
+
+export async function getAppPaths(): Promise<AppPaths> {
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke<AppPaths>("get_app_paths");
 }
 
 export async function testRs485(): Promise<string> {

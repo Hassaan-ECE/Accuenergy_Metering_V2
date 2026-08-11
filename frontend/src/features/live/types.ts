@@ -67,7 +67,27 @@ export function emptyValues(): MeterValues {
 }
 
 export function configSummary(config: AppConfig): string {
-  const sampleText = config.sampleHz === 0 ? "manual max" : `${config.sampleHz} Hz`;
+  const sampleText = config.sampleHz === 0 ? "max speed" : `${config.sampleHz} Hz`;
   const runText = config.runHours === 0 ? "until stopped" : `${config.runHours} h`;
   return `${config.port} @ ${config.baudrate} baud  ·  Device ${config.deviceId}  ·  ${config.parity}/${config.stopBits}  ·  ${sampleText}  ·  ${runText}`;
+}
+
+export function validateConfig(config: AppConfig): string | null {
+  if (!config.port.trim()) return "COM port is required.";
+  if (!Number.isInteger(config.baudrate) || config.baudrate <= 0) return "Baud rate must be greater than 0.";
+  if (!Number.isInteger(config.deviceId) || config.deviceId < 1 || config.deviceId > 247) {
+    return "Device ID must be between 1 and 247.";
+  }
+  if (!(["N", "E", "O"] as const).includes(config.parity)) return "Parity must be N, E, or O.";
+  if (config.stopBits !== 1 && config.stopBits !== 2) return "Stop bits must be 1 or 2.";
+  if (!Number.isFinite(config.sampleHz) || config.sampleHz < 0) return "Sample rate cannot be negative.";
+  if (!Number.isFinite(config.runHours) || config.runHours < 0) return "Run hours cannot be negative.";
+  if (!Number.isInteger(config.commitEvery) || config.commitEvery <= 0) {
+    return "Commit every must be greater than 0.";
+  }
+  if (!Number.isFinite(config.timeoutSeconds) || config.timeoutSeconds <= 0) {
+    return "Timeout must be greater than 0.";
+  }
+  if (!Number.isInteger(config.retries) || config.retries < 0) return "Retries cannot be negative.";
+  return null;
 }

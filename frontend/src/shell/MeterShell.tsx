@@ -1,11 +1,13 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { FolderOpen, Play, Settings2, Square, Wifi } from "lucide-react";
 
 import { APP_NAME, APP_VERSION, DEVICE_MODEL, DEVICE_PROTOCOL } from "@/app/branding";
 import { LiveGraph } from "@/features/live/LiveGraph";
 import { MetricCard } from "@/features/live/MetricCard";
-import { configSummary, DEFAULT_CONFIG } from "@/features/live/types";
+import { configSummary, DEFAULT_CONFIG, type AppConfig } from "@/features/live/types";
 import { useDemoLiveStream } from "@/features/live/useDemoLiveStream";
+import { SettingsDialog } from "@/features/settings/SettingsDialog";
+import { getConfig, isTauriRuntime, listSerialPorts, saveConfig, type PortInfo } from "@/integrations/tauri/meterBridge";
 import { readTheme, THEME_STORAGE_KEY, type ThemeMode } from "@/platform/ui/theme";
 import { Button } from "@/shared/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/shared/components/ui/card";
@@ -15,9 +17,26 @@ import { ShellStatusStrip } from "./ShellStatusStrip";
 
 export function MeterShell() {
   const [theme, setTheme] = useState<ThemeMode>(() => readTheme());
-  const [config] = useState(DEFAULT_CONFIG);
+  const [config, setConfig] = useState<AppConfig>(() => ({ ...DEFAULT_CONFIG, themeName: readTheme() }));
+  const [runtime, setRuntime] = useState<"checking" | "desktop" | "browser">("checking");
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [ports, setPorts] = useState<PortInfo[]>([]);
+  const [refreshingPorts, setRefreshingPorts] = useState(false);
+  const [savingSettings, setSavingSettings] = useState(false);
   const stream = useDemoLiveStream();
-  const summary = useMemo(() => configSummary({ ...config, themeName: theme }), [config, theme]);
+  const summary = useMemo(() => configSummary(config), [config]);
+
+  const refreshPorts = useCallback(async () => {
+    if (runtime !== "desktop") return;
+    setRefreshingPorts(true);
+    try {
+      setPorts(await listSerialPorts());
+    } catch (error) {
+      stream.pushLog(`Port enumeration failed: ${String(error)}`);
+    } finally {
+      setRefreshingPorts(false);
+    }
+  }, [runtime, stream]);
 
   useEffect(() => {
     document.documentElement.classList.toggle("dark", theme === "dark");
@@ -26,10 +45,58 @@ export function MeterShell() {
 
   useEffect(() => {
     document.title = `${APP_NAME} v${APP_VERSION}`;
-  }, []);
+    let cancelled = false;
+    void (async () => {
+      const desktop = await isTauriRuntime();
+      if (cancelled) return;
+      setRuntime(desktop ? "desktop" : "browser");
+      if (!desktop) {
+        stream.pushLog("Browser mode detected; meter controls use synthetic demo data.");
+        return;
+      }
+      try {
+        const loaded = await getConfig();
+        if (cancelled) return;
+        setConfig(loaded);
+        setTheme(loaded.themeName);
+        setPorts(await listSerialPorts());
+        stream.pushLog("Desktop backend connected; persisted settings loaded.");
+      } catch (error) {
+        stream.pushLog(`Desktop initialization warning: ${String(error)}`);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [stream.pushLog]);
+
+  useEffect(() => {
+    if (runtime === "browser") {
+      window.localStorage.setItem("accuenergyMetering.config", JSON.stringify(config));
+    }
+  }, [config, runtime]);
 
   const onThemeToggle = (): void => {
-    setTheme((current) => (current === "light" ? "dark" : "light"));
+    const next: ThemeMode = theme === "light" ? "dark" : "light";
+    setTheme(next);
+    const nextConfig: AppConfig = { ...config, themeName: next };
+    setConfig(nextConfig);
+    if (runtime === "desktop") {
+      void saveConfig(nextConfig).catch((error) => stream.pushLog(`Theme persistence failed: ${String(error)}`));
+    }
+  };
+
+  const onSaveSettings = async (nextConfig: AppConfig) => {
+    setSavingSettings(true);
+    try {
+      if (runtime === "desktop") await saveConfig(nextConfig);
+      setConfig(nextConfig);
+      setTheme(nextConfig.themeName);
+      setSettingsOpen(false);
+      stream.pushLog("Settings saved.");
+    } finally {
+      setSavingSettings(false);
+    }
   };
 
   const statusMessage =
@@ -63,7 +130,7 @@ export function MeterShell() {
           </Button>
           <Button
             disabled={stream.isRunning}
-            onClick={() => stream.pushLog("Settings dialog — coming in port Phase 2.")}
+            onClick={() => setSettingsOpen(true)}
             variant="outline"
           >
             <Settings2 className="size-4" />
@@ -77,7 +144,7 @@ export function MeterShell() {
             Open Report
           </Button>
           <span className="ml-auto text-xs text-muted-foreground">
-            UI scaffold · demo stream only until backend Modbus is connected
+            {runtime === "desktop" ? "Desktop backend · Modbus monitor pending" : runtime === "browser" ? "Browser demo mode" : "Detecting runtime…"}
           </span>
         </div>
 
@@ -138,6 +205,16 @@ export function MeterShell() {
       </div>
 
       <ShellStatusStrip message={statusMessage} tone={statusTone} />
+      <SettingsDialog
+        config={config}
+        onClose={() => setSettingsOpen(false)}
+        onRefreshPorts={refreshPorts}
+        onSave={onSaveSettings}
+        open={settingsOpen}
+        ports={ports}
+        refreshingPorts={refreshingPorts}
+        saving={savingSettings}
+      />
     </div>
   );
 }
