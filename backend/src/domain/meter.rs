@@ -75,7 +75,7 @@ pub const ACUVIM_BASIC_TARGETS: &[MeterTarget] = &[
     },
 ];
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub struct MeterValues {
     pub frequency_hz: Option<f64>,
@@ -88,6 +88,46 @@ pub struct MeterValues {
     pub current_i3: Option<f64>,
     pub active_power_p1: Option<f64>,
     pub power_factor_pf1: Option<f64>,
+}
+
+impl MeterValues {
+    pub fn set(&mut self, key: &str, value: Option<f64>) {
+        match key {
+            "frequency_hz" => self.frequency_hz = value,
+            "phase_voltage_v1" => self.phase_voltage_v1 = value,
+            "phase_voltage_v2" => self.phase_voltage_v2 = value,
+            "phase_voltage_v3" => self.phase_voltage_v3 = value,
+            "line_voltage_v12" => self.line_voltage_v12 = value,
+            "current_i1" => self.current_i1 = value,
+            "current_i2" => self.current_i2 = value,
+            "current_i3" => self.current_i3 = value,
+            "active_power_p1" => self.active_power_p1 = value,
+            "power_factor_pf1" => self.power_factor_pf1 = value,
+            _ => {}
+        }
+    }
+
+    pub fn get(&self, key: &str) -> Option<f64> {
+        match key {
+            "frequency_hz" => self.frequency_hz,
+            "phase_voltage_v1" => self.phase_voltage_v1,
+            "phase_voltage_v2" => self.phase_voltage_v2,
+            "phase_voltage_v3" => self.phase_voltage_v3,
+            "line_voltage_v12" => self.line_voltage_v12,
+            "current_i1" => self.current_i1,
+            "current_i2" => self.current_i2,
+            "current_i3" => self.current_i3,
+            "active_power_p1" => self.active_power_p1,
+            "power_factor_pf1" => self.power_factor_pf1,
+            _ => None,
+        }
+    }
+
+    pub fn any_value(&self) -> bool {
+        ACUVIM_BASIC_TARGETS
+            .iter()
+            .any(|target| self.get(target.key).is_some())
+    }
 }
 
 /// Decode two 16-bit holding registers as big-endian IEEE-754 float.

@@ -1,6 +1,16 @@
-use crate::domain::config::AppConfig;
-use crate::paths::AppPaths;
-use tauri::AppHandle;
+use std::path::PathBuf;
+
+use tauri::{AppHandle, State};
+use tauri_plugin_opener::OpenerExt;
+
+use crate::{
+    domain::config::AppConfig,
+    meter_io::MeterSnapshot,
+    monitor::{MonitorManager, MonitorState, StartMonitorResult},
+    paths::AppPaths,
+    report,
+    storage::{self, SessionRecord},
+};
 
 #[tauri::command]
 pub fn ping() -> &'static str {
@@ -42,18 +52,85 @@ pub fn get_app_paths(app: AppHandle) -> Result<AppPaths, String> {
 }
 
 #[tauri::command]
-pub fn test_rs485() -> Result<String, String> {
-    Err("Modbus RTU client not wired yet. See docs/PORT_PLAN.md Phase 2.".into())
+pub async fn test_rs485(app: AppHandle) -> Result<MeterSnapshot, String> {
+    let paths = AppPaths::resolve(&app)?;
+    let config = AppConfig::load(&paths.settings)
+        .unwrap_or_default()
+        .normalized()?;
+    tauri::async_runtime::spawn_blocking(move || crate::meter_io::probe(&config))
+        .await
+        .map_err(|error| format!("RS485 test task failed: {error}"))
 }
 
 #[tauri::command]
-pub fn start_monitor() -> Result<(), String> {
-    Err("Monitor loop not wired yet. Frontend uses demo stream for UI work.".into())
+pub fn start_monitor(
+    app: AppHandle,
+    manager: State<'_, MonitorManager>,
+) -> Result<StartMonitorResult, String> {
+    let paths = AppPaths::resolve(&app)?;
+    let config = AppConfig::load(&paths.settings)
+        .unwrap_or_default()
+        .normalized()?;
+    manager.start(app, paths, config)
 }
 
 #[tauri::command]
-pub fn stop_monitor() -> Result<(), String> {
-    Ok(())
+pub fn stop_monitor(manager: State<'_, MonitorManager>) -> Result<Option<String>, String> {
+    manager.stop()
+}
+
+#[tauri::command]
+pub fn get_monitor_state(manager: State<'_, MonitorManager>) -> Result<MonitorState, String> {
+    manager.state()
+}
+
+#[tauri::command]
+pub async fn generate_report(app: AppHandle, session_id: String) -> Result<String, String> {
+    let paths = AppPaths::resolve(&app)?;
+    tauri::async_runtime::spawn_blocking(move || report::generate(&paths, &session_id))
+        .await
+        .map_err(|error| format!("Report task failed: {error}"))?
+        .map(|path| path.to_string_lossy().into_owned())
+}
+
+#[tauri::command]
+pub fn list_sessions(app: AppHandle) -> Result<Vec<SessionRecord>, String> {
+    let paths = AppPaths::resolve(&app)?;
+    storage::list_sessions(&paths.database, 100)
+}
+
+#[tauri::command]
+pub fn get_latest_session(app: AppHandle) -> Result<Option<SessionRecord>, String> {
+    let paths = AppPaths::resolve(&app)?;
+    storage::get_latest_session(&paths.database)
+}
+
+#[tauri::command]
+pub async fn export_session_csv(app: AppHandle, session_id: String) -> Result<String, String> {
+    let paths = AppPaths::resolve(&app)?;
+    tauri::async_runtime::spawn_blocking(move || report::export_csv(&paths, &session_id))
+        .await
+        .map_err(|error| format!("CSV export task failed: {error}"))?
+        .map(|path| path.to_string_lossy().into_owned())
+}
+
+#[tauri::command]
+pub fn open_path(app: AppHandle, path: String) -> Result<(), String> {
+    let paths = AppPaths::resolve(&app)?;
+    let requested = PathBuf::from(path);
+    let canonical_root = paths
+        .root
+        .canonicalize()
+        .map_err(|error| format!("Could not resolve app data directory: {error}"))?;
+    let canonical_path = requested
+        .canonicalize()
+        .map_err(|error| format!("Path does not exist: {error}"))?;
+    if !canonical_path.starts_with(&canonical_root) {
+        return Err("Only files and folders inside the app data directory can be opened.".into());
+    }
+    app.opener()
+        .open_path(canonical_path.to_string_lossy(), None::<&str>)
+        .map_err(|error| format!("Could not open path: {error}"))
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
