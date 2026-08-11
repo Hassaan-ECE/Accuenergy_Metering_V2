@@ -409,7 +409,7 @@ fn status_message(values: &MeterValues) -> String {
 }
 
 fn should_log_consecutive_error(count: u64) -> bool {
-    count == 1 || count == 5 || count == 10 || count % 25 == 0
+    count == 1 || count == 5 || count == 10 || count.is_multiple_of(25)
 }
 
 fn session_id(started_at: DateTime<Local>) -> String {

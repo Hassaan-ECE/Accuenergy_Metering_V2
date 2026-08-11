@@ -123,8 +123,10 @@ mod tests {
 
     #[test]
     fn rejects_invalid_device_id_and_parity() {
-        let mut config = AppConfig::default();
-        config.device_id = 248;
+        let mut config = AppConfig {
+            device_id: 248,
+            ..AppConfig::default()
+        };
         assert_eq!(
             config.validate().unwrap_err(),
             "Device ID must be between 1 and 247."

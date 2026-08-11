@@ -20,14 +20,21 @@ This is a ground-up port of the older Python/PySide6 project to:
 
 - [Legacy analysis](docs/LEGACY_ANALYSIS.md)
 - [Port plan](docs/PORT_PLAN.md)
+- [Implementation decisions](docs/DECISIONS.md)
 - [Agent notes](AGENTS.md)
 
-## Status (0.1.0 scaffold)
+## Status (0.1.0)
 
-- Inventory-style UI shell (metrics, graph, log, theme toggle)
-- **Demo** live stream (no hardware required) for UI development
-- Rust domain: config + Acuvim basic register map + float decode tests
-- Modbus monitor / SQLite / reports: **not wired yet** (see port plan Phase 2–3)
+The software port is feature-complete against the required legacy workflow:
+
+- Persisted meter settings and Windows COM-port discovery
+- Real Modbus RTU probe and long-lived monitor worker
+- SQLite WAL sessions/readings with batched commits
+- Tauri live events feeding metric cards, activity log, and uPlot charts
+- Session history, self-contained HTML reports, and CSV export
+- Light/dark Inventory-style UI and close-while-running protection
+
+**Hardware status:** the desktop app builds and launches, but no serial ports were attached during the final verification on August 11, 2026. Live Acuvim/RS485 communication is therefore not claimed as hardware-verified.
 
 ## Develop
 
@@ -40,6 +47,45 @@ bun run desktop        # full Tauri window
 
 Requires: Bun, Rust toolchain, WebView2 (Windows).
 
+The browser URL intentionally uses synthetic demo data and never touches serial ports or app files. The Tauri desktop window uses the Rust backend when `ping` succeeds.
+
+## Verify
+
+```powershell
+cd C:\Projects\Active\Accuenergy_Metering
+bun install
+bun run lint
+bun run test
+bun run build:frontend
+cd backend
+cargo fmt --check
+cargo test
+```
+
+## App data
+
+Runtime data is stored under:
+
+```text
+%LOCALAPPDATA%\com.accuenergy.metering\
+  settings.json
+  meter_log.db
+  reports\
+  exports\
+```
+
+The database uses SQLite WAL mode. A reading row is written only when at least one metric decodes successfully; a full miss increments the error count without inserting a row.
+
+## Lab workflow
+
+1. Open `Settings`, select the adapter COM port, and confirm the serial parameters.
+2. Run `Test RS485` and inspect the per-register PASS/FAIL activity log.
+3. Run `Start` for 30–60 seconds and confirm cards/graphs update.
+4. Run `Stop`; verify the session count and finalized status.
+5. Generate the HTML report, export CSV, and inspect `meter_log.db`.
+
 ## Lab defaults
 
-COM5 · 19200 8N1 · device ID 1 · 1 Hz sample (0 = max rate) · run hours 0 = until stopped
+COM5 · 19200 8N1 · device ID 1 · 1 Hz sample · 24 hour run
+
+`sample_hz = 0` means maximum bus speed. `run_hours = 0` means run until stopped.

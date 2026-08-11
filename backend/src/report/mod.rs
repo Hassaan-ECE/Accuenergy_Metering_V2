@@ -452,17 +452,10 @@ fn optional_csv(value: Option<f64>) -> String {
 }
 
 fn format_float(value: f64) -> String {
-    if value.abs() >= 1000.0 {
-        format!("{value:.6}")
-            .trim_end_matches('0')
-            .trim_end_matches('.')
-            .to_string()
-    } else {
-        format!("{value:.6}")
-            .trim_end_matches('0')
-            .trim_end_matches('.')
-            .to_string()
-    }
+    format!("{value:.6}")
+        .trim_end_matches('0')
+        .trim_end_matches('.')
+        .to_string()
 }
 
 fn html_escape(value: &str) -> String {

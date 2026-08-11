@@ -1,6 +1,6 @@
 # Port plan — Accuenergy Metering → Tauri / Rust / Bun / React
 
-**Status:** scaffold complete (Phase 0)  
+**Status:** software implementation complete; live meter validation pending
 **Date:** 2026-08-11  
 **Legacy reference:** `C:\Projects\Active\Accuenergy_Metering_Legacy` (clone of GitHub repo)  
 **UI reference:** `C:\Projects\Active\Inventory_Management` (shell, theme tokens, Button/Card patterns, release discipline)  
@@ -25,11 +25,13 @@ Replace the Python/PySide6 app with a **desktop product** that:
 | Item | Status |
 |------|--------|
 | Legacy repo cloned and source read | **Verified** |
-| Register map + float decode extracted into Rust | **Verified** (unit test for 60.0f) |
-| Inventory UI patterns reused (theme CSS, shell) | **Verified** (scaffold) |
-| Frontend builds with Bun | Check after `bun install` this session |
-| Real COM/Modbus round-trip from Rust | **Not verified** — needs lab meter + Phase 2 |
-| Block multi-register reads | **Assumed unsafe until datasheet pass** |
+| Register map + float decode extracted into Rust | **Verified** (known 60.0f decode test) |
+| Inventory UI patterns reused (theme CSS, cards, shell) | **Verified** |
+| Frontend lint/tests/production build | **Verified** on August 11, 2026 |
+| Rust formatting/tests | **Verified** (10 tests) on August 11, 2026 |
+| Full Tauri dev launch | **Verified**; responsive `Accuenergy Metering v0.1.0` window |
+| Real COM/Modbus round-trip from Rust | **Not verified** — no serial ports were attached |
+| Register access strategy | **Implemented as sequential two-register reads**, matching Python |
 
 ---
 
@@ -48,8 +50,8 @@ Replace the Python/PySide6 app with a **desktop product** that:
 │  domain/     config, meter map, decode                      │
 │  monitor/    session loop, stop token, batching             │
 │  storage/    SQLite sessions + readings                     │
-│  report/     HTML (and later CSV)                           │
-│  api/        list_ports, test_rs485, start/stop, config     │
+│  report/     self-contained HTML + CSV                      │
+│  api/        ports, probe, monitor, sessions, reports       │
 └─────────────────────────────────────────────────────────────┘
                            │
                     USB-RS485 / COM
@@ -76,56 +78,56 @@ Replace the Python/PySide6 app with a **desktop product** that:
 
 **Success:** `bun run build:frontend` succeeds; desktop opens with demo stream (no meter required).
 
-### Phase 1 — Frontend product shell (no hardware)
+### Phase 1 — Frontend product shell (complete)
 
 Focus: UX parity with better layout than Qt.
 
-- [ ] Settings dialog (all `AppConfig` fields; theme separate in header)
-- [ ] COM port dropdown wired when `list_serial_ports` is real; free-text fallback
-- [ ] Multi-series graph tabs or metric picker (Frequency / Voltage / Current / Power)
-- [ ] Session info panel (last session id, DB path, report path)
-- [ ] Replace demo stream with bridge that prefers Tauri when `ping` works
-- [ ] Vitest smoke for metric formatting + config summary
+- [x] Settings dialog (all `AppConfig` fields; theme separate in header)
+- [x] COM port dropdown wired to `list_serial_ports`; free-text fallback
+- [x] Multi-series graph tabs (Frequency / Voltage / Current / Power / PF)
+- [x] Session info panel (session id, DB path, report path)
+- [x] Bridge prefers Tauri when `ping` works; demo remains browser-only
+- [x] Vitest coverage for config and the 1,800-point graph buffer
 
 **Success:** full UI clickable offline; demo mode still available for UI work without COM.
 
-### Phase 2 — Rust Modbus + monitor loop
+### Phase 2 — Rust Modbus + monitor loop (software complete)
 
 Focus: behavioral parity with `Code/core/meter.py` + `monitor.py`.
 
-- [ ] Dependencies: `serialport`, `tokio-modbus` (or sync RTU client), `rusqlite` bundled
-- [ ] `list_serial_ports` from OS
-- [ ] `test_rs485` → read basic targets once; return structured snapshot
-- [ ] Monitor task:
+- [x] Dependencies: `serialport`, `tokio-modbus` sync RTU, `rusqlite` bundled
+- [x] `list_serial_ports` from OS
+- [x] `test_rs485` → sequentially read all basic targets; return structured snapshot
+- [x] Monitor task:
   - long-lived client
   - sample interval / max speed
   - run_hours / until stop
   - batch insert every `commit_every`
   - emit `live-update` and `monitor-log` events
   - finalize session on stop/error/timeout
-- [ ] Config load/save under `%LOCALAPPDATA%\com.accuenergy.metering\settings.json`
-- [ ] DB path under app data (or configurable project Data folder for lab familiarity)
+- [x] Config load/save under `%LOCALAPPDATA%\com.accuenergy.metering\settings.json`
+- [x] DB under `%LOCALAPPDATA%\com.accuenergy.metering\meter_log.db`
 
-**Success:** with lab meter on COM5 defaults — Test RS485 green; Start logs samples; Stop finalizes session.  
-**Hard gate:** no “works” claim without live hardware smoke in that session.
+**Software success:** monitor work is off the UI thread; Stop flushes/finalizes; duration, error thresholds, recovery logs, batching, and one-session enforcement match the specified behavior.
+**Hardware gate remains open:** no “live Modbus works” claim until the lab workflow succeeds against a meter.
 
-### Phase 3 — Reports + export
+### Phase 3 — Reports + export (complete)
 
 Focus: parity with `report.py`, better ergonomics.
 
-- [ ] HTML report generation in Rust (stats + SVG or embedded chart images)
-- [ ] Open report / open folders via `tauri-plugin-opener`
-- [ ] Optional CSV export of session readings
-- [ ] Session list UI (completed runs)
+- [x] Self-contained HTML report in Rust (latest values, stats, inline SVG trends)
+- [x] Open report / app-data folders via `tauri-plugin-opener`
+- [x] CSV export of session readings
+- [x] Session list UI with report/export actions
 
-**Success:** report opens in browser; stats match a known Python-generated session within float noise (or re-import same DB for comparison).
+**Software success:** report and CSV integration tests pass against a temporary SQLite session. Cross-port comparison with the Python app remains part of lab validation.
 
 ### Phase 4 — Hardening + release
 
-- [ ] Product icon rebrand (stop borrowing Inventory icon)
-- [ ] Crash-safe stop on window close
+- [x] Product-specific waveform icon with reproducible SVG/Python sources
+- [x] Confirm, stop, flush, and finalize on window close while monitoring
 - [ ] Logging to file under app data
-- [ ] Version triple: `package.json` / `Cargo.toml` / `tauri.conf.json`
+- [x] Version triple: `package.json` / `Cargo.toml` / `tauri.conf.json`
 - [ ] Signed NSIS when ready for team (product-specific updater key under `%USERPROFILE%\.tauri\`)
 - [ ] S-drive staging: `S:\Engineering\Public\Syed_Hassaan_Shah\Accuenergy_Metering\` (or agreed name)
 
@@ -133,7 +135,7 @@ Focus: parity with `report.py`, better ergonomics.
 
 ---
 
-## IPC contract (planned)
+## IPC contract (implemented)
 
 ### Commands
 
@@ -145,16 +147,18 @@ Focus: parity with `report.py`, better ergonomics.
 | `test_rs485` | FE → BE | snapshot string or structured JSON |
 | `start_monitor` / `stop_monitor` | FE → BE | single active session |
 | `generate_report` | FE → BE | session id → path |
-| `list_sessions` | FE → BE | Phase 3 |
+| `list_sessions` / `get_latest_session` | FE → BE | Session history |
+| `export_session_csv` | FE → BE | Session id → CSV path |
+| `open_path` | FE → BE | Restricted to app-data files/folders |
 
 ### Events
 
 | Event | Payload |
 |-------|---------|
 | `live-update` | `LiveUpdate` (camelCase) |
-| `monitor-log` | `{ ts, message }` |
+| `monitor-log` | `{ timestampMs, message }` |
 | `monitor-finished` | `SessionSummary` |
-| `monitor-failed` | `{ kind, message }` |
+| `monitor-failed` | `{ kind, message, sessionId }` |
 
 ### LiveUpdate (frontend `types.ts`)
 
@@ -168,14 +172,14 @@ Matches legacy fields: sessionId, timestampMs, values map, sampleCount, errorCou
 |------|------|
 | Shell UI | `frontend/src/shell/` |
 | Live metrics / graph | `frontend/src/features/live/` |
-| Settings UI | `frontend/src/features/settings/` (Phase 1) |
+| Settings UI | `frontend/src/features/settings/` |
 | Tauri bridge | `frontend/src/integrations/tauri/meterBridge.ts` |
 | Theme | `frontend/src/platform/ui/theme.ts` + `app/index.css` |
 | Commands | `backend/src/api/` |
 | Domain | `backend/src/domain/` |
-| Monitor | `backend/src/monitor/` (Phase 2) |
-| Storage | `backend/src/storage/` (Phase 2) |
-| Report | `backend/src/report/` (Phase 3) |
+| Monitor | `backend/src/monitor/` |
+| Storage | `backend/src/storage/` |
+| Report | `backend/src/report/` |
 
 ---
 
@@ -201,19 +205,23 @@ Matches legacy fields: sessionId, timestampMs, values map, sampleCount, errorCou
 
 | Layer | Approach |
 |-------|----------|
-| Decode | Rust unit tests (known float bit patterns) |
-| Config validation | Rust unit tests |
-| UI pure logic | Vitest (formatMetric, configSummary) |
-| Monitor | Integration test with mock serial or recorded frames if available |
-| E2E | Manual lab checklist: ports → test → start 30s → stop → report |
+| Decode | Rust unit test with known float bit pattern — passing |
+| Config validation | Rust unit tests — passing |
+| UI pure logic | Vitest config and ring-buffer tests — passing |
+| Storage/report | Temp SQLite integration tests — passing |
+| Monitor policy | Unit tests for session IDs, status text, error thresholds — passing |
+| Desktop smoke | Tauri dev window launched and responded — passing |
+| Hardware E2E | Pending: ports → test → start 30–60s → stop → report |
 
 ---
 
-## Suggested next session
+## Required lab validation
 
-1. Confirm frontend build + open desktop (`bun install`, `bun run desktop`).
-2. Phase 1 settings dialog + wire demo vs Tauri switch.
-3. Phase 2 with meter on the bench: implement `test_rs485` first (smallest vertical slice), then the monitor loop.
+1. Attach the USB-RS485 adapter and confirm its COM port appears in Settings.
+2. Run Test RS485 against the Acuvim IIW and save the activity log result.
+3. Start a 30–60 second session; confirm all available cards and graphs update.
+4. Stop and verify the finalized SQLite row count, HTML report, and CSV export.
+5. Compare one generated report with the same source readings in the Python app if exact cross-port validation is required.
 
 ---
 
