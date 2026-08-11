@@ -73,10 +73,22 @@ pub fn connect(config: &AppConfig) -> Result<ModbusContext, String> {
 }
 
 pub fn read_basic_targets(context: &mut ModbusContext, config: &AppConfig) -> Vec<MeterReading> {
-    ACUVIM_BASIC_TARGETS
-        .iter()
-        .map(|target| read_target(context, config, target))
-        .collect()
+    read_basic_targets_until(context, config, || false)
+}
+
+pub fn read_basic_targets_until(
+    context: &mut ModbusContext,
+    config: &AppConfig,
+    mut should_stop: impl FnMut() -> bool,
+) -> Vec<MeterReading> {
+    let mut readings = Vec::with_capacity(ACUVIM_BASIC_TARGETS.len());
+    for target in ACUVIM_BASIC_TARGETS {
+        if should_stop() {
+            break;
+        }
+        readings.push(read_target(context, config, target));
+    }
+    readings
 }
 
 pub fn readings_to_values(readings: &[MeterReading]) -> MeterValues {

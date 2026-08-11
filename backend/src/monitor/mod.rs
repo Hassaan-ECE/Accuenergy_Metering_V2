@@ -255,7 +255,12 @@ fn run_monitor_session(
                 break;
             }
 
-            let readings = meter_io::read_basic_targets(&mut context, config);
+            let readings = meter_io::read_basic_targets_until(&mut context, config, || {
+                stop.load(Ordering::SeqCst)
+            });
+            if stop.load(Ordering::SeqCst) {
+                break;
+            }
             let values = meter_io::readings_to_values(&readings);
             let timestamp = Local::now();
             let message;

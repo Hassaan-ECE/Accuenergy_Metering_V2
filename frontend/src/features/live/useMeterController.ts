@@ -316,7 +316,8 @@ export function useMeterController() {
         if (!confirmed) return;
         const waitForEnd = new Promise<void>((resolve) => {
           monitorEndWaiters.current.add(resolve);
-          window.setTimeout(resolve, Math.min(15_000, Math.max(7_000, config.timeoutSeconds * 11_000)));
+          const readWaitMs = config.timeoutSeconds * (config.retries + 1) * 1_000;
+          window.setTimeout(resolve, Math.min(120_000, Math.max(7_000, readWaitMs + 5_000)));
         });
         await stop();
         await waitForEnd;
@@ -330,7 +331,7 @@ export function useMeterController() {
       cancelled = true;
       unlisten?.();
     };
-  }, [config.timeoutSeconds, runtime, stop]);
+  }, [config.retries, config.timeoutSeconds, runtime, stop]);
 
   const test = useCallback(async (): Promise<MeterSnapshot | null> => {
     if (runtime !== "desktop") {
