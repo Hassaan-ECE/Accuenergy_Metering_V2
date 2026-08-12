@@ -79,7 +79,8 @@ The implementation is considered software-complete when the persisted settings, 
 
 ## Verification boundary
 
-- `bun install`, frontend lint/tests/build, Rust formatting/tests, and a full Tauri dev launch succeeded on August 11, 2026.
+- Frontend lint/tests/build and Rust formatting/tests/clippy succeeded on August 12, 2026: 25 Vitest tests and 35 Rust tests passed.
+- A duplicate desktop launch was not forced because this workspace already had its Vite server on port 5173 and `accuenergy-metering.exe` running; the existing owner processes were left untouched. The prior full Tauri launch remains the desktop verification boundary.
 - Windows reported no attached serial ports during verification. No live Modbus, meter response, real sample stream, or hardware-generated report is claimed.
 - Abrupt process termination or power loss can temporarily leave the latest session marked `running`; committed WAL readings remain available and the next idle desktop initialization finalizes the orphan. Normal UI close is intercepted and waits for the implemented stop/finalize path.
 - Signed installer publication and S-drive staging remain deferred; they are not required for the 0.1.0 parity target.
