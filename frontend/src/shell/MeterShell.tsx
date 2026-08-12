@@ -406,8 +406,14 @@ export function MeterShell() {
                 )}
                 style={{ gridTemplateRows: `repeat(${Math.ceil(graphCards.length / 2)}, minmax(0, 1fr))` }}
               >
-                {graphCards.map(({ lines, mode, preset }) => (
-                  <div className="min-h-0 overflow-hidden rounded-lg border border-border bg-muted/15 p-1.5" key={mode}>
+                {graphCards.map(({ lines, mode, preset }, index) => (
+                  <div
+                    className={cn(
+                      "min-h-0 overflow-hidden rounded-lg border border-border bg-muted/15 p-1.5",
+                      graphCards.length === 3 && index === 0 && "col-span-2",
+                    )}
+                    key={mode}
+                  >
                     <LiveGraph
                       lines={lines}
                       secondaryUnit={preset.secondaryUnit}
