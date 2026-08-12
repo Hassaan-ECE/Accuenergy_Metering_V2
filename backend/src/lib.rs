@@ -26,6 +26,7 @@ pub fn run() {
             api::start_monitor,
             api::stop_monitor,
             api::get_monitor_state,
+            api::recover_orphaned_sessions,
             api::generate_report,
             api::list_sessions,
             api::get_latest_session,

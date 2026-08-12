@@ -115,6 +115,18 @@ pub fn get_monitor_state(manager: State<'_, MonitorManager>) -> Result<MonitorSt
 }
 
 #[tauri::command]
+pub fn recover_orphaned_sessions(
+    app: AppHandle,
+    manager: State<'_, MonitorManager>,
+) -> Result<Vec<String>, String> {
+    if manager.state()?.running {
+        return Ok(Vec::new());
+    }
+    let paths = AppPaths::resolve(&app)?;
+    storage::recover_orphaned_sessions(&paths.database)
+}
+
+#[tauri::command]
 pub async fn generate_report(app: AppHandle, session_id: String) -> Result<String, String> {
     let paths = AppPaths::resolve(&app)?;
     tauri::async_runtime::spawn_blocking(move || report::generate(&paths, &session_id))

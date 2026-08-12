@@ -35,6 +35,7 @@ import {
   loadSessionReview,
   openPath,
   previewMeterDefaults,
+  recoverOrphanedSessions,
   saveConfig,
   startMonitor,
   stopMonitor,
@@ -178,12 +179,19 @@ export function useMeterController() {
       }
       setRuntime("desktop");
       try {
-        const [configResult, [loadedPaths, loadedPorts, loadedSessions, monitorState]] = await Promise.all([
+        const [configResult, [loadedPaths, loadedPorts, initialSessions, monitorState]] = await Promise.all([
           getConfig()
             .then((value) => ({ value, error: null }))
             .catch((error: unknown) => ({ value: null, error })),
           Promise.all([getAppPaths(), listSerialPorts(), listSessions(), getMonitorState()]),
         ]);
+        if (cancelled) return;
+        let loadedSessions = initialSessions;
+        let recoveredSessionIds: string[] = [];
+        if (!monitorState.running) {
+          recoveredSessionIds = await recoverOrphanedSessions();
+          if (recoveredSessionIds.length > 0) loadedSessions = await listSessions();
+        }
         if (cancelled) return;
         if (configResult.value) setConfig(configResult.value);
         setPaths(loadedPaths);
@@ -206,6 +214,11 @@ export function useMeterController() {
               ? "Desktop backend connected, but saved settings could not be loaded."
               : "Desktop backend connected; persisted settings and sessions loaded.",
           );
+        }
+        if (recoveredSessionIds.length > 0) {
+          const message = `Recovered ${recoveredSessionIds.length} leftover session(s): ${recoveredSessionIds.join(", ")}`;
+          pushLog(message);
+          showNotice("success", "Previous session recovered", message);
         }
         if (configResult.error) {
           const message = `${String(configResult.error)} The saved settings were not replaced with defaults. Open Settings to correct or overwrite the file.`;

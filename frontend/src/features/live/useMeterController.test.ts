@@ -27,6 +27,7 @@ const mocks = vi.hoisted(() => {
     loadSessionReview: vi.fn(),
     openPath: vi.fn(),
     previewMeterDefaults: vi.fn(),
+    recoverOrphanedSessions: vi.fn(),
     saveConfig: vi.fn(),
     startMonitor: vi.fn(),
     stopMonitor: vi.fn(),
@@ -56,6 +57,7 @@ vi.mock("@/integrations/tauri/meterBridge", () => ({
   loadSessionReview: mocks.loadSessionReview,
   openPath: mocks.openPath,
   previewMeterDefaults: mocks.previewMeterDefaults,
+  recoverOrphanedSessions: mocks.recoverOrphanedSessions,
   saveConfig: mocks.saveConfig,
   startMonitor: mocks.startMonitor,
   stopMonitor: mocks.stopMonitor,
@@ -157,6 +159,7 @@ beforeEach(() => {
   mocks.listSerialPorts.mockResolvedValue([]);
   mocks.listSessions.mockResolvedValue([]);
   mocks.getMonitorState.mockResolvedValue({ running: false, sessionId: null });
+  mocks.recoverOrphanedSessions.mockResolvedValue([]);
   mocks.saveConfig.mockImplementation(async (config) => config);
   mocks.stopMonitor.mockResolvedValue(null);
   mocks.generateReport.mockResolvedValue("C:\\data\\reports\\report.html");
@@ -237,6 +240,39 @@ describe("desktop settings initialization", () => {
 
     await act(async () => rendered.result.current.persistConfig({ ...DEFAULT_CONFIG, port: "COM6" }));
     expect(mocks.saveConfig).toHaveBeenCalledWith({ ...DEFAULT_CONFIG, port: "COM6" });
+  });
+});
+
+describe("orphaned session recovery", () => {
+  it("recovers leftovers before presenting the refreshed session list", async () => {
+    const orphaned = session();
+    const recovered = session({
+      endedAt: "2026-08-12T02:00:00-04:00",
+      status: "stopped",
+      stopReason: "Process exited unexpectedly",
+      sampleCount: 3,
+    });
+    mocks.listSessions.mockResolvedValueOnce([orphaned]).mockResolvedValueOnce([recovered]);
+    mocks.recoverOrphanedSessions.mockResolvedValueOnce(["run_requested"]);
+
+    const rendered = renderHook(() => useMeterController());
+
+    await waitFor(() => expect(rendered.result.current.currentSessionId).toBe("run_requested"));
+    expect(mocks.recoverOrphanedSessions).toHaveBeenCalledTimes(1);
+    expect(mocks.listSessions).toHaveBeenCalledTimes(2);
+    expect(rendered.result.current.sessions[0]).toMatchObject({
+      status: "stopped",
+      stopReason: "Process exited unexpectedly",
+      sampleCount: 3,
+    });
+    expect(rendered.result.current.logLines.some((line) => line.includes("Recovered 1 leftover session(s): run_requested"))).toBe(true);
+  });
+
+  it("does not recover while reattaching to an active monitor", async () => {
+    const rendered = await renderRunningController([session()]);
+
+    expect(rendered.result.current.status).toBe("running");
+    expect(mocks.recoverOrphanedSessions).not.toHaveBeenCalled();
   });
 });
 

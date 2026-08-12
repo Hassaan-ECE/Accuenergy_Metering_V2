@@ -177,6 +177,55 @@ pub fn finalize_session(
     Ok(())
 }
 
+pub fn recover_orphaned_sessions(path: &Path) -> Result<Vec<String>, String> {
+    let mut connection = connect(path)?;
+    let transaction = connection
+        .transaction()
+        .map_err(|error| format!("Could not begin orphaned session recovery: {error}"))?;
+    let session_ids = {
+        let mut statement = transaction
+            .prepare(
+                "SELECT session_id FROM sessions
+                 WHERE status = 'running' OR ended_at IS NULL
+                 ORDER BY started_at",
+            )
+            .map_err(|error| format!("Could not prepare orphaned session query: {error}"))?;
+        let rows = statement
+            .query_map([], |row| row.get::<_, String>(0))
+            .map_err(|error| format!("Could not query orphaned sessions: {error}"))?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(|error| format!("Could not read orphaned session row: {error}"))?
+    };
+
+    for session_id in &session_ids {
+        let sample_count: i64 = transaction
+            .query_row(
+                "SELECT COUNT(*) FROM readings WHERE session_id = ?1",
+                [session_id],
+                |row| row.get(0),
+            )
+            .map_err(|error| {
+                format!("Could not count readings for orphaned session {session_id}: {error}")
+            })?;
+        transaction
+            .execute(
+                "UPDATE sessions
+                 SET ended_at = ?1,
+                     status = 'stopped',
+                     stop_reason = 'Process exited unexpectedly',
+                     sample_count = ?2
+                 WHERE session_id = ?3",
+                params![Local::now().to_rfc3339(), sample_count, session_id],
+            )
+            .map_err(|error| format!("Could not recover orphaned session {session_id}: {error}"))?;
+    }
+
+    transaction
+        .commit()
+        .map_err(|error| format!("Could not commit orphaned session recovery: {error}"))?;
+    Ok(session_ids)
+}
+
 pub fn list_sessions(path: &Path, limit: usize) -> Result<Vec<SessionRecord>, String> {
     let connection = connect(path)?;
     let mut statement = connection
@@ -334,5 +383,113 @@ mod tests {
         let readings = load_readings(&database, "run_test").unwrap();
         assert_eq!(readings.len(), 1);
         assert_eq!(readings[0].values.frequency_hz, Some(60.0));
+    }
+
+    #[test]
+    fn recovers_running_session_without_losing_readings() {
+        let temp = tempdir().unwrap();
+        let database = temp.path().join("meter.db");
+        let mut connection = connect(&database).unwrap();
+        create_session(
+            &connection,
+            "run_orphaned",
+            Local::now(),
+            &AppConfig::default(),
+        )
+        .unwrap();
+        connection
+            .execute(
+                "UPDATE sessions SET error_count = 4 WHERE session_id = ?1",
+                ["run_orphaned"],
+            )
+            .unwrap();
+        let mut batch = (0..3)
+            .map(|index| {
+                ReadingRow::new(
+                    "run_orphaned",
+                    Local::now(),
+                    MeterValues {
+                        frequency_hz: Some(60.0 + f64::from(index)),
+                        ..MeterValues::default()
+                    },
+                )
+            })
+            .collect();
+        flush_readings(&mut connection, &mut batch).unwrap();
+        drop(connection);
+
+        let recovered = recover_orphaned_sessions(&database).unwrap();
+
+        assert_eq!(recovered, vec!["run_orphaned"]);
+        let session = get_session(&database, "run_orphaned").unwrap().unwrap();
+        assert_eq!(session.status, "stopped");
+        assert!(session.ended_at.is_some());
+        assert_eq!(
+            session.stop_reason.as_deref(),
+            Some("Process exited unexpectedly")
+        );
+        assert_eq!(session.sample_count, 3);
+        assert_eq!(session.error_count, 4);
+        assert_eq!(load_readings(&database, "run_orphaned").unwrap().len(), 3);
+        assert!(require_finalized_session(&database, "run_orphaned", "reviewing it").is_ok());
+    }
+
+    #[test]
+    fn leaves_finalized_session_unchanged() {
+        let temp = tempdir().unwrap();
+        let database = temp.path().join("meter.db");
+        let connection = connect(&database).unwrap();
+        create_session(
+            &connection,
+            "run_finished",
+            Local::now(),
+            &AppConfig::default(),
+        )
+        .unwrap();
+        finalize_session(
+            &connection,
+            "run_finished",
+            Local::now(),
+            "completed",
+            "Run duration reached",
+            12,
+            2,
+        )
+        .unwrap();
+        drop(connection);
+        let before = get_session(&database, "run_finished").unwrap().unwrap();
+
+        let recovered = recover_orphaned_sessions(&database).unwrap();
+        let after = get_session(&database, "run_finished").unwrap().unwrap();
+
+        assert!(recovered.is_empty());
+        assert_eq!(after.ended_at, before.ended_at);
+        assert_eq!(after.status, before.status);
+        assert_eq!(after.stop_reason, before.stop_reason);
+        assert_eq!(after.sample_count, before.sample_count);
+        assert_eq!(after.error_count, before.error_count);
+    }
+
+    #[test]
+    fn recovers_running_session_with_no_readings() {
+        let temp = tempdir().unwrap();
+        let database = temp.path().join("meter.db");
+        let connection = connect(&database).unwrap();
+        create_session(
+            &connection,
+            "run_empty",
+            Local::now(),
+            &AppConfig::default(),
+        )
+        .unwrap();
+        drop(connection);
+
+        let recovered = recover_orphaned_sessions(&database).unwrap();
+
+        assert_eq!(recovered, vec!["run_empty"]);
+        let session = get_session(&database, "run_empty").unwrap().unwrap();
+        assert_eq!(session.status, "stopped");
+        assert!(session.ended_at.is_some());
+        assert_eq!(session.sample_count, 0);
     }
 }

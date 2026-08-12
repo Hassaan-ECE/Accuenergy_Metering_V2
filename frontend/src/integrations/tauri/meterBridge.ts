@@ -77,6 +77,10 @@ export function getMonitorState(): Promise<MonitorRuntimeState> {
   return invokeCommand<MonitorRuntimeState>("get_monitor_state");
 }
 
+export function recoverOrphanedSessions(): Promise<string[]> {
+  return invokeCommand<string[]>("recover_orphaned_sessions");
+}
+
 export function listSessions(): Promise<SessionRecord[]> {
   return invokeCommand<SessionRecord[]>("list_sessions");
 }
