@@ -81,6 +81,7 @@ export interface SessionRecord {
   errorCount: number;
   reportPath: string | null;
   config: AppConfig;
+  configAvailable: boolean;
 }
 
 export interface ReviewReading {

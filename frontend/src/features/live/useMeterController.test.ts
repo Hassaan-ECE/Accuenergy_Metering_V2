@@ -84,6 +84,7 @@ function session(overrides: Partial<SessionRecord> = {}): SessionRecord {
     errorCount: 0,
     reportPath: null,
     config: DEFAULT_CONFIG,
+    configAvailable: true,
     ...overrides,
   };
 }

@@ -40,6 +40,7 @@ pub struct SessionRecord {
     pub error_count: u64,
     pub report_path: Option<String>,
     pub config: AppConfig,
+    pub config_available: bool,
 }
 
 pub fn connect(path: &Path) -> Result<Connection, String> {
@@ -327,7 +328,13 @@ pub fn update_report_path(path: &Path, session_id: &str, report_path: &Path) -> 
 
 fn row_to_session(row: &rusqlite::Row<'_>) -> rusqlite::Result<SessionRecord> {
     let config_json: String = row.get(8)?;
-    let config = serde_json::from_str(&config_json).unwrap_or_default();
+    let (config, config_available) = match serde_json::from_str::<AppConfig>(&config_json) {
+        Ok(config) => match config.normalized() {
+            Ok(config) => (config, true),
+            Err(_) => (AppConfig::default(), false),
+        },
+        Err(_) => (AppConfig::default(), false),
+    };
     Ok(SessionRecord {
         session_id: row.get(0)?,
         started_at: row.get(1)?,
@@ -338,6 +345,7 @@ fn row_to_session(row: &rusqlite::Row<'_>) -> rusqlite::Result<SessionRecord> {
         error_count: row.get(6)?,
         report_path: row.get(7)?,
         config,
+        config_available,
     })
 }
 

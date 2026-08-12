@@ -38,13 +38,14 @@ fn load_session_with_limit(
         return Err("This session has no readings to review.".into());
     }
     let original_reading_count = readings.len();
+    let config_available = session.config_available;
     Ok(ReviewDataset {
         source: "session".into(),
         source_label: paths.database.to_string_lossy().into_owned(),
         session,
         readings: downsample_readings(readings, maximum_points),
         original_reading_count,
-        config_available: true,
+        config_available,
     })
 }
 
@@ -212,6 +213,7 @@ fn load_csv_with_limit(path: &Path, maximum_points: usize) -> Result<ReviewDatas
         error_count: error_count.unwrap_or(0),
         report_path: None,
         config: config.unwrap_or_default(),
+        config_available,
     };
 
     Ok(ReviewDataset {
@@ -386,7 +388,12 @@ mod tests {
         let paths = AppPaths::from_root(temp.path().join("app-data")).unwrap();
         let mut connection = storage::connect(&paths.database).unwrap();
         let started = Local::now();
-        storage::create_session(&connection, "run_review", started, &AppConfig::default()).unwrap();
+        let config = AppConfig {
+            port: "COM7".into(),
+            device_id: 3,
+            ..AppConfig::default()
+        };
+        storage::create_session(&connection, "run_review", started, &config).unwrap();
         let mut batch = (0..5)
             .map(|index| {
                 ReadingRow::new(
@@ -416,9 +423,60 @@ mod tests {
 
         assert_eq!(review.source, "session");
         assert_eq!(review.original_reading_count, 5);
+        assert!(review.config_available);
+        assert_eq!(review.session.config.port, "COM7");
+        assert_eq!(review.session.config.device_id, 3);
         assert_eq!(review.readings.len(), 3);
         assert_eq!(review.readings[0].values.frequency_hz, Some(60.0));
         assert_eq!(review.readings[2].values.frequency_hz, Some(64.0));
+    }
+
+    #[test]
+    fn loads_readings_when_database_session_config_is_invalid() {
+        let temp = tempdir().unwrap();
+        let paths = AppPaths::from_root(temp.path().join("app-data")).unwrap();
+        let mut connection = storage::connect(&paths.database).unwrap();
+        let started = Local::now();
+        storage::create_session(
+            &connection,
+            "run_bad_config",
+            started,
+            &AppConfig::default(),
+        )
+        .unwrap();
+        let mut batch = vec![ReadingRow::new(
+            "run_bad_config",
+            started,
+            MeterValues {
+                frequency_hz: Some(59.95),
+                ..MeterValues::default()
+            },
+        )];
+        storage::flush_readings(&mut connection, &mut batch).unwrap();
+        storage::finalize_session(
+            &connection,
+            "run_bad_config",
+            started + Duration::seconds(1),
+            "stopped",
+            "Stopped by user",
+            1,
+            0,
+        )
+        .unwrap();
+        connection
+            .execute(
+                "UPDATE sessions SET config_json = 'not-json' WHERE session_id = ?1",
+                ["run_bad_config"],
+            )
+            .unwrap();
+        drop(connection);
+
+        let review = load_session(&paths, "run_bad_config").unwrap();
+
+        assert!(!review.config_available);
+        assert!(!review.session.config_available);
+        assert_eq!(review.readings.len(), 1);
+        assert_eq!(review.readings[0].values.frequency_hz, Some(59.95));
     }
 
     #[test]
