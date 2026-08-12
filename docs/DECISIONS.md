@@ -60,6 +60,8 @@ The implementation is considered software-complete when the persisted settings, 
 - Repeat finalized session metadata (`started_at`, `ended_at`, `status`, and serialized `config_json`) on each CSV data row. This stays spreadsheet-friendly while making each exported file self-contained for the later CSV review slice.
 - Load finalized SQLite sessions through a dedicated read-only review payload containing session metadata and readings. Display at most 12,000 evenly sampled points while preserving first and last readings; retain the original sample count in the UI.
 - Keep live/controller state underneath review mode rather than overwriting it. Exiting review therefore returns to the prior live-ready state without restarting the backend or mutating meter settings.
+- Parse imported CSV files in Rust against named columns from the app export format. Meter values and timestamps are required; session/config metadata is optional for compatibility, with the UI explicitly marking missing settings metadata.
+- Use the Tauri file picker for CSV selection, then pass the chosen path to the Rust parser. Imported files remain read-only and are never copied into SQLite or written back to the meter.
 
 ## Verification boundary
 

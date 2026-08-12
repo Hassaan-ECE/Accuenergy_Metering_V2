@@ -3,6 +3,7 @@ import {
   Database,
   Download,
   FileChartColumnIncreasing,
+  FileUp,
   FolderOpen,
   PanelRightClose,
   PanelRightOpen,
@@ -236,6 +237,14 @@ export function MeterShell() {
             <Download className="size-4" />
             {controller.exportingSessionId ? "Exporting…" : "Export CSV"}
           </Button>
+          <Button
+            disabled={controller.isRunning || controller.loadingReview || controller.runtime !== "desktop"}
+            onClick={controller.loadReviewCsv}
+            variant="outline"
+          >
+            <FileUp className="size-4" />
+            {controller.loadingReview ? "Loading…" : "Load CSV"}
+          </Button>
           <div className="mx-1 hidden h-6 w-px bg-border lg:block" />
           <div className="flex items-center gap-1 rounded-lg bg-muted/70 p-1" aria-label="Visible graph groups">
             <span className="px-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Graphs</span>
@@ -310,10 +319,14 @@ export function MeterShell() {
             <SearchCheck className="size-5 shrink-0 text-primary" />
             <div className="min-w-0 flex-1">
               <p className="truncate text-sm font-semibold">
-                Reviewing session <span className="font-mono">{controller.review.session.sessionId}</span> (read-only)
+                Reviewing {controller.review.source === "csv" ? "CSV session" : "session"}{" "}
+                <span className="font-mono">{controller.review.session.sessionId}</span> (read-only)
               </p>
-              <p className="truncate text-xs text-muted-foreground" title={configSummary(controller.review.session.config)}>
-                {configSummary(controller.review.session.config)} · {controller.review.sourceLabel}
+              <p className="truncate text-xs text-muted-foreground" title={controller.review.sourceLabel}>
+                {controller.review.configAvailable
+                  ? configSummary(controller.review.session.config)
+                  : "Settings metadata unavailable"}{" "}
+                · {controller.review.sourceLabel}
               </p>
             </div>
             <Button onClick={controller.exitReview} size="sm" variant="outline">

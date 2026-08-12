@@ -27,6 +27,7 @@ pub fn run() {
             api::list_sessions,
             api::get_latest_session,
             api::load_session_review,
+            api::load_csv_review,
             api::export_session_csv,
             api::open_path,
         ])

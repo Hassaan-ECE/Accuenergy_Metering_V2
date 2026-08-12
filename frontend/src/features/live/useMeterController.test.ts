@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => {
     isTauriRuntime: vi.fn(),
     listSerialPorts: vi.fn(),
     listSessions: vi.fn(),
+    loadCsvReview: vi.fn(),
     loadSessionReview: vi.fn(),
     openPath: vi.fn(),
     saveConfig: vi.fn(),
@@ -29,6 +30,7 @@ const mocks = vi.hoisted(() => {
     onCloseRequested: vi.fn(async () => () => undefined),
     closeWindow: vi.fn(),
     confirm: vi.fn(),
+    openDialog: vi.fn(),
   };
 });
 
@@ -41,6 +43,7 @@ vi.mock("@/integrations/tauri/meterBridge", () => ({
   isTauriRuntime: mocks.isTauriRuntime,
   listSerialPorts: mocks.listSerialPorts,
   listSessions: mocks.listSessions,
+  loadCsvReview: mocks.loadCsvReview,
   loadSessionReview: mocks.loadSessionReview,
   openPath: mocks.openPath,
   saveConfig: mocks.saveConfig,
@@ -56,7 +59,7 @@ vi.mock("@tauri-apps/api/window", () => ({
     onCloseRequested: mocks.onCloseRequested,
   }),
 }));
-vi.mock("@tauri-apps/plugin-dialog", () => ({ confirm: mocks.confirm }));
+vi.mock("@tauri-apps/plugin-dialog", () => ({ confirm: mocks.confirm, open: mocks.openDialog }));
 
 function session(overrides: Partial<SessionRecord> = {}): SessionRecord {
   return {
@@ -139,10 +142,32 @@ beforeEach(() => {
       },
     ],
     originalReadingCount: 2,
+    configAvailable: true,
+  });
+  mocks.loadCsvReview.mockResolvedValue({
+    source: "csv",
+    sourceLabel: "C:\\imports\\run_requested.csv",
+    session: session({
+      endedAt: "2026-08-12T01:01:00-04:00",
+      status: "completed",
+      stopReason: "Imported CSV",
+      sampleCount: 1,
+    }),
+    readings: [
+      {
+        sessionId: "run_requested",
+        tsUnix: 2,
+        tsIso: "2026-08-12T01:00:01-04:00",
+        values: { ...emptyValues(), frequency_hz: 59.9 },
+      },
+    ],
+    originalReadingCount: 1,
+    configAvailable: true,
   });
   mocks.openPath.mockResolvedValue(undefined);
   mocks.onCloseRequested.mockResolvedValue(() => undefined);
   mocks.confirm.mockResolvedValue(false);
+  mocks.openDialog.mockResolvedValue(null);
 });
 
 afterEach(() => cleanup());
@@ -264,5 +289,34 @@ describe("database session review", () => {
     act(() => rendered.result.current.exitReview());
     expect(rendered.result.current.isReviewing).toBe(false);
     expect(rendered.result.current.graph.times).toEqual([]);
+  });
+});
+
+describe("CSV review", () => {
+  it("loads a selected exported CSV into review mode", async () => {
+    mocks.openDialog.mockResolvedValueOnce("C:\\imports\\run_requested.csv");
+    const rendered = renderHook(() => useMeterController());
+    await waitFor(() => expect(rendered.result.current.runtime).toBe("desktop"));
+
+    await act(async () => rendered.result.current.loadReviewCsv());
+
+    expect(mocks.loadCsvReview).toHaveBeenCalledWith("C:\\imports\\run_requested.csv");
+    expect(rendered.result.current.review?.source).toBe("csv");
+    expect(rendered.result.current.values.frequency_hz).toBe(59.9);
+    expect(rendered.result.current.graph.times).toEqual([2]);
+    expect(rendered.result.current.notice).toMatchObject({
+      tone: "success",
+      title: "CSV loaded",
+    });
+  });
+
+  it("does nothing when the file picker is cancelled", async () => {
+    const rendered = renderHook(() => useMeterController());
+    await waitFor(() => expect(rendered.result.current.runtime).toBe("desktop"));
+
+    await act(async () => rendered.result.current.loadReviewCsv());
+
+    expect(mocks.loadCsvReview).not.toHaveBeenCalled();
+    expect(rendered.result.current.isReviewing).toBe(false);
   });
 });

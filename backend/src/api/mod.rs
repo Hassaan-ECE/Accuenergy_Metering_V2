@@ -118,6 +118,14 @@ pub async fn load_session_review(
 }
 
 #[tauri::command]
+pub async fn load_csv_review(path: String) -> Result<ReviewDataset, String> {
+    let path = PathBuf::from(path);
+    tauri::async_runtime::spawn_blocking(move || review::load_csv(&path))
+        .await
+        .map_err(|error| format!("CSV review task failed: {error}"))?
+}
+
+#[tauri::command]
 pub async fn export_session_csv(app: AppHandle, session_id: String) -> Result<String, String> {
     let paths = AppPaths::resolve(&app)?;
     tauri::async_runtime::spawn_blocking(move || report::export_csv(&paths, &session_id))

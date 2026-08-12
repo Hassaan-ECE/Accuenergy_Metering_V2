@@ -96,6 +96,7 @@ export interface ReviewDataset {
   session: SessionRecord;
   readings: ReviewReading[];
   originalReadingCount: number;
+  configAvailable: boolean;
 }
 
 export interface SessionSummary {

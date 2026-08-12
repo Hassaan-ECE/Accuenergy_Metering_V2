@@ -78,6 +78,10 @@ export function loadSessionReview(sessionId: string): Promise<ReviewDataset> {
   return invokeCommand<ReviewDataset>("load_session_review", { sessionId });
 }
 
+export function loadCsvReview(path: string): Promise<ReviewDataset> {
+  return invokeCommand<ReviewDataset>("load_csv_review", { path });
+}
+
 export function generateReport(sessionId: string): Promise<string> {
   return invokeCommand<string>("generate_report", { sessionId });
 }

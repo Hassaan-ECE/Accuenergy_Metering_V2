@@ -28,6 +28,7 @@ import {
   isTauriRuntime,
   listSerialPorts,
   listSessions,
+  loadCsvReview,
   loadSessionReview,
   openPath,
   saveConfig,
@@ -553,6 +554,41 @@ export function useMeterController() {
     [pushLog, runtime, showNotice],
   );
 
+  const loadReviewCsv = useCallback(async () => {
+    if (runtime !== "desktop") {
+      showNotice("warning", "Desktop feature", "CSV review is available in the desktop app.");
+      return;
+    }
+    if (runningRef.current) {
+      showNotice("warning", "Monitoring is active", "Stop monitoring before loading a CSV file.");
+      return;
+    }
+    const { open } = await import("@tauri-apps/plugin-dialog");
+    const selected = await open({
+      title: "Load Accuenergy session CSV",
+      defaultPath: paths?.exports,
+      multiple: false,
+      directory: false,
+      filters: [{ name: "Accuenergy CSV", extensions: ["csv"] }],
+    });
+    if (!selected || Array.isArray(selected)) return;
+
+    setLoadingReview(true);
+    try {
+      const dataset = await loadCsvReview(selected);
+      setReview(dataset);
+      pushLog(
+        `Loaded CSV ${selected}: ${dataset.readings.length.toLocaleString()} displayed of ${dataset.originalReadingCount.toLocaleString()} readings.`,
+      );
+      showNotice("success", "CSV loaded", `${dataset.session.sessionId} is open in read-only review mode.`);
+    } catch (error) {
+      pushLog(`CSV review failed: ${String(error)}`);
+      showNotice("error", "Could not load CSV", String(error));
+    } finally {
+      setLoadingReview(false);
+    }
+  }, [paths?.exports, pushLog, runtime, showNotice]);
+
   const exitReview = useCallback(() => {
     if (!review) return;
     pushLog(`Exited review mode for ${review.session.sessionId}.`);
@@ -630,6 +666,7 @@ export function useMeterController() {
     exportCsv,
     exportCurrentCsv,
     loadReviewSession,
+    loadReviewCsv,
     exitReview,
     openDataPath,
     dismissNotice,
