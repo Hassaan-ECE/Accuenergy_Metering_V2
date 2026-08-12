@@ -8,7 +8,7 @@ use crate::{
     meter_config::{self, ApplyMeterDefaultsRequest, ApplyMeterDefaultsResult, MeterConfigPreview},
     meter_io::MeterSnapshot,
     monitor::{MonitorManager, MonitorState, StartMonitorResult},
-    paths::AppPaths,
+    paths::{append_app_log, AppPaths},
     report,
     review::{self, ReviewDataset},
     storage::{self, SessionRecord},
@@ -28,7 +28,10 @@ pub fn get_config(app: AppHandle) -> Result<AppConfig, String> {
 #[tauri::command]
 pub fn save_config(app: AppHandle, config: AppConfig) -> Result<AppConfig, String> {
     let paths = AppPaths::resolve(&app)?;
-    config.save(&paths.settings)
+    config.save(&paths.settings).map_err(|error| {
+        let _ = append_app_log(&paths.log_file, &format!("Settings save failed: {error}"));
+        error
+    })
 }
 
 #[tauri::command]
@@ -78,7 +81,13 @@ pub async fn preview_meter_defaults(
     let config = AppConfig::load(&paths.settings)?.normalized()?;
     tauri::async_runtime::spawn_blocking(move || {
         let _configuration_guard = configuration_guard;
-        meter_config::preview(&config, target_device_id, target_baudrate)
+        let result = meter_config::preview(&config, target_device_id, target_baudrate);
+        let message = result
+            .as_ref()
+            .map(|preview| preview.summary.as_str())
+            .unwrap_or_else(|error| error.as_str());
+        let _ = append_app_log(&paths.log_file, message);
+        result
     })
     .await
     .map_err(|error| format!("Meter configuration preview task failed: {error}"))?
@@ -95,7 +104,13 @@ pub async fn apply_meter_defaults(
     let config = AppConfig::load(&paths.settings)?.normalized()?;
     tauri::async_runtime::spawn_blocking(move || {
         let _configuration_guard = configuration_guard;
-        meter_config::apply(&config, request, &paths.settings)
+        let result = meter_config::apply(&config, request, &paths.settings);
+        let message = result
+            .as_ref()
+            .map(|applied| applied.summary.as_str())
+            .unwrap_or_else(|error| error.as_str());
+        let _ = append_app_log(&paths.log_file, message);
+        result
     })
     .await
     .map_err(|error| format!("Meter configuration task failed: {error}"))?
@@ -130,7 +145,14 @@ pub fn recover_orphaned_sessions(
         return Ok(Vec::new());
     }
     let paths = AppPaths::resolve(&app)?;
-    storage::recover_orphaned_sessions(&paths.database)
+    let recovered = storage::recover_orphaned_sessions(&paths.database)?;
+    if !recovered.is_empty() {
+        let _ = append_app_log(
+            &paths.log_file,
+            &format!("Recovered orphaned sessions: {}", recovered.join(", ")),
+        );
+    }
+    Ok(recovered)
 }
 
 #[tauri::command]

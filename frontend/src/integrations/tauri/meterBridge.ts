@@ -21,6 +21,8 @@ export interface AppPaths {
   database: string;
   reports: string;
   exports: string;
+  logs: string;
+  logFile: string;
 }
 
 async function invokeCommand<Result>(command: string, args?: Record<string, unknown>): Promise<Result> {

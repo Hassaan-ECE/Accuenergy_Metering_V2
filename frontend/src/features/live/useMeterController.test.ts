@@ -156,6 +156,8 @@ beforeEach(() => {
     database: "C:\\data\\meter_log.db",
     reports: "C:\\data\\reports",
     exports: "C:\\data\\exports",
+    logs: "C:\\data\\logs",
+    logFile: "C:\\data\\logs\\app.log",
   });
   mocks.listSerialPorts.mockResolvedValue([]);
   mocks.listSessions.mockResolvedValue([]);

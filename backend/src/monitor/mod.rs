@@ -15,7 +15,7 @@ use tauri::{AppHandle, Emitter};
 use crate::{
     domain::{config::AppConfig, meter::MeterValues},
     meter_io,
-    paths::AppPaths,
+    paths::{append_app_log, AppPaths},
     storage::{self, ReadingRow},
 };
 
@@ -115,10 +115,18 @@ impl MonitorManager {
         let session_id = session_id(started_at);
         let stop = Arc::new(AtomicBool::new(false));
         self.reserve_monitor(session_id.clone(), stop.clone())?;
+        let _ = append_app_log(
+            &paths.log_file,
+            &format!(
+                "Starting monitor {session_id} using {}, device {}, {} baud, 8{}{}.",
+                config.port, config.device_id, config.baudrate, config.parity, config.stop_bits
+            ),
+        );
 
         let manager = self.clone();
         let thread_session_id = session_id.clone();
         let database_path = paths.database.to_string_lossy().into_owned();
+        let log_file = paths.log_file.clone();
         let spawn_result = thread::Builder::new()
             .name(format!("meter-{thread_session_id}"))
             .spawn(move || {
@@ -137,14 +145,20 @@ impl MonitorManager {
                         let _ = app.emit("monitor-finished", summary);
                     }
                     Ok(Err(failure)) => {
+                        let _ = append_app_log(
+                            &paths.log_file,
+                            &format!("Monitor failed: {}", failure.message),
+                        );
                         let _ = app.emit("monitor-failed", failure);
                     }
                     Err(_) => {
+                        let message = "The monitor thread terminated unexpectedly.";
+                        let _ = append_app_log(&paths.log_file, message);
                         let _ = app.emit(
                             "monitor-failed",
                             MonitorFailure {
                                 kind: "runtime".into(),
-                                message: "The monitor thread terminated unexpectedly.".into(),
+                                message: message.into(),
                                 session_id: Some(thread_session_id.clone()),
                             },
                         );
@@ -155,6 +169,10 @@ impl MonitorManager {
 
         if let Err(error) = spawn_result {
             self.clear(&session_id);
+            let _ = append_app_log(
+                &log_file,
+                &format!("Could not start monitor thread: {error}"),
+            );
             return Err(format!("Could not start monitor thread: {error}"));
         }
 
@@ -262,6 +280,7 @@ fn run_monitor_session(
 
     emit_log(
         app,
+        paths,
         format!(
             "Connected to {}. Logging to {}",
             config.port,
@@ -273,6 +292,7 @@ fn run_monitor_session(
         let deadline = started_at + ChronoDuration::milliseconds(milliseconds);
         emit_log(
             app,
+            paths,
             format!(
                 "Monitoring started; will stop at {}.",
                 deadline.format("%Y-%m-%d %H:%M:%S")
@@ -280,7 +300,7 @@ fn run_monitor_session(
         );
         Some(deadline)
     } else {
-        emit_log(app, "Monitoring started; running until stopped.");
+        emit_log(app, paths, "Monitoring started; running until stopped.");
         None
     };
 
@@ -320,6 +340,7 @@ fn run_monitor_session(
                 if consecutive_errors > 0 {
                     emit_log(
                         app,
+                        paths,
                         format!("Communication restored after {consecutive_errors} read error(s)."),
                     );
                 }
@@ -333,10 +354,11 @@ fn run_monitor_session(
                     .unwrap_or_else(|| "Read error".into());
                 if should_log_consecutive_error(consecutive_errors) {
                     if consecutive_errors == 1 {
-                        emit_log(app, format!("Read error: {message}"));
+                        emit_log(app, paths, format!("Read error: {message}"));
                     } else {
                         emit_log(
                             app,
+                            paths,
                             format!(
                                 "Still not receiving data: {consecutive_errors} consecutive read errors. Last error: {message}"
                             ),
@@ -401,6 +423,7 @@ fn run_monitor_session(
     .map_err(|message| runtime_failure(Some(session_id), message))?;
     emit_log(
         app,
+        paths,
         format!(
             "Run finished: {sample_count} samples, {error_count} errors, {}.",
             stop_reason.to_ascii_lowercase()
@@ -420,12 +443,14 @@ fn run_monitor_session(
     })
 }
 
-fn emit_log(app: &AppHandle, message: impl Into<String>) {
+fn emit_log(app: &AppHandle, paths: &AppPaths, message: impl Into<String>) {
+    let message = message.into();
+    let _ = append_app_log(&paths.log_file, &message);
     let _ = app.emit(
         "monitor-log",
         MonitorLog {
             timestamp_ms: Local::now().timestamp_millis(),
-            message: message.into(),
+            message,
         },
     );
 }
