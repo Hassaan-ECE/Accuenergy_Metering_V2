@@ -21,8 +21,8 @@ struct MetricStats {
 }
 
 pub fn generate(paths: &AppPaths, session_id: &str) -> Result<PathBuf, String> {
-    let session = storage::get_session(&paths.database, session_id)?
-        .ok_or_else(|| format!("Session not found: {session_id}"))?;
+    let session =
+        storage::require_finalized_session(&paths.database, session_id, "generating a report")?;
     let readings = storage::load_readings(&paths.database, session_id)?;
     if readings.is_empty() {
         return Err("Not enough samples to generate a report.".into());
@@ -153,8 +153,7 @@ pub fn generate(paths: &AppPaths, session_id: &str) -> Result<PathBuf, String> {
 }
 
 pub fn export_csv(paths: &AppPaths, session_id: &str) -> Result<PathBuf, String> {
-    storage::get_session(&paths.database, session_id)?
-        .ok_or_else(|| format!("Session not found: {session_id}"))?;
+    storage::require_finalized_session(&paths.database, session_id, "exporting CSV")?;
     let readings = storage::load_readings(&paths.database, session_id)?;
     if readings.is_empty() {
         return Err("This session has no readings to export.".into());
@@ -476,7 +475,7 @@ mod tests {
     use crate::{domain::meter::MeterValues, storage::ReadingRow};
 
     #[test]
-    fn generates_self_contained_report_and_csv() {
+    fn finalized_session_generates_self_contained_report_and_csv() {
         let temp = tempdir().unwrap();
         let paths = AppPaths::from_root(temp.path().join("app-data")).unwrap();
         let mut connection = storage::connect(&paths.database).unwrap();
@@ -533,6 +532,88 @@ mod tests {
         let csv_text = fs::read_to_string(csv).unwrap();
         assert!(csv_text.contains("frequency_hz"));
         assert!(csv_text.contains("60.1"));
+    }
+
+    #[test]
+    fn running_session_with_flushed_readings_rejects_report_and_csv() {
+        let temp = tempdir().unwrap();
+        let paths = AppPaths::from_root(temp.path().join("app-data")).unwrap();
+        let mut connection = storage::connect(&paths.database).unwrap();
+        let started = Local::now();
+        storage::create_session(
+            &connection,
+            "run_in_progress",
+            started,
+            &AppConfig::default(),
+        )
+        .unwrap();
+        let mut batch = vec![ReadingRow::new(
+            "run_in_progress",
+            started,
+            MeterValues {
+                frequency_hz: Some(60.0),
+                ..MeterValues::default()
+            },
+        )];
+        storage::flush_readings(&mut connection, &mut batch).unwrap();
+        drop(connection);
+
+        let report_error = generate(&paths, "run_in_progress").unwrap_err();
+        assert!(report_error.contains("not finalized"));
+        assert!(report_error.contains("session to finish"));
+        assert!(report_error.contains("generating a report"));
+        assert!(!paths
+            .reports
+            .join("accuenergy_report_run_in_progress.html")
+            .exists());
+
+        let csv_error = export_csv(&paths, "run_in_progress").unwrap_err();
+        assert!(csv_error.contains("not finalized"));
+        assert!(csv_error.contains("session to finish"));
+        assert!(csv_error.contains("exporting CSV"));
+        assert!(!paths
+            .exports
+            .join("accuenergy_readings_run_in_progress.csv")
+            .exists());
+    }
+
+    #[test]
+    fn missing_and_finalized_empty_session_errors_are_preserved() {
+        let temp = tempdir().unwrap();
+        let paths = AppPaths::from_root(temp.path().join("app-data")).unwrap();
+
+        assert_eq!(
+            generate(&paths, "run_missing").unwrap_err(),
+            "Session not found: run_missing"
+        );
+        assert_eq!(
+            export_csv(&paths, "run_missing").unwrap_err(),
+            "Session not found: run_missing"
+        );
+
+        let connection = storage::connect(&paths.database).unwrap();
+        let started = Local::now();
+        storage::create_session(&connection, "run_empty", started, &AppConfig::default()).unwrap();
+        storage::finalize_session(
+            &connection,
+            "run_empty",
+            Local::now(),
+            "stopped",
+            "Stopped by user",
+            0,
+            0,
+        )
+        .unwrap();
+        drop(connection);
+
+        assert_eq!(
+            generate(&paths, "run_empty").unwrap_err(),
+            "Not enough samples to generate a report."
+        );
+        assert_eq!(
+            export_csv(&paths, "run_empty").unwrap_err(),
+            "This session has no readings to export."
+        );
     }
 
     #[test]

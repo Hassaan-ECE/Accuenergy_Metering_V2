@@ -217,6 +217,21 @@ pub fn get_session(path: &Path, session_id: &str) -> Result<Option<SessionRecord
         .map_err(|error| format!("Could not query session: {error}"))
 }
 
+pub fn require_finalized_session(
+    path: &Path,
+    session_id: &str,
+    action: &str,
+) -> Result<SessionRecord, String> {
+    let session =
+        get_session(path, session_id)?.ok_or_else(|| format!("Session not found: {session_id}"))?;
+    if session.status == "running" || session.ended_at.is_none() {
+        return Err(format!(
+            "Session {session_id} is not finalized. Stop monitoring and wait for the session to finish before {action}."
+        ));
+    }
+    Ok(session)
+}
+
 pub fn load_readings(path: &Path, session_id: &str) -> Result<Vec<ReadingRow>, String> {
     let connection = connect(path)?;
     let mut statement = connection

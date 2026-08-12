@@ -47,6 +47,8 @@ export interface Notice {
   message: string;
 }
 
+type StopOutcome = "requested" | "inactive" | "failed";
+
 function browserConfig(): AppConfig {
   let storedConfig: Partial<AppConfig> = {};
   try {
@@ -113,6 +115,7 @@ export function useMeterController() {
       setLastReportPath(latest.reportPath);
       if (!runningRef.current) setCurrentSessionId(latest.sessionId);
     }
+    return next;
   }, []);
 
   const generateAndOpen = useCallback(
@@ -254,6 +257,7 @@ export function useMeterController() {
       return;
     }
     if (runtime !== "desktop") return;
+    pendingReportRef.current = false;
     setStatus("connecting");
     setProbeStatus(null);
     setValues(emptyValues());
@@ -273,24 +277,29 @@ export function useMeterController() {
     }
   }, [config.baudrate, config.port, pushLog, runtime, showNotice, startDemo]);
 
-  const stop = useCallback(async () => {
+  const stop = useCallback(async (): Promise<StopOutcome> => {
     if (runtime === "browser") {
       stopDemo();
-      return;
+      return "inactive";
     }
-    if (runtime !== "desktop") return;
+    if (runtime !== "desktop") return "inactive";
     setStatus("stopping");
     try {
       const sessionId = await stopMonitor();
-      if (sessionId) pushLog("Stop requested; waiting for the current Modbus read to finish.");
-      else {
-        setStatus("idle");
-        resolveMonitorEnd();
+      if (sessionId) {
+        pushLog("Stop requested; waiting for the current Modbus read to finish.");
+        return "requested";
       }
+      pendingReportRef.current = false;
+      setStatus("idle");
+      resolveMonitorEnd();
+      return "inactive";
     } catch (error) {
+      pendingReportRef.current = false;
       setStatus("error");
       pushLog(`Stop request failed: ${String(error)}`);
       showNotice("error", "Stop request failed", String(error));
+      return "failed";
     }
   }, [pushLog, resolveMonitorEnd, runtime, showNotice, stopDemo]);
 
@@ -411,9 +420,38 @@ export function useMeterController() {
       return;
     }
     if (runningRef.current) {
+      const requestedSessionId = currentSessionId;
       pendingReportRef.current = true;
       pushLog("Report requested; stopping the active session first.");
-      await stop();
+      const outcome = await stop();
+      if (outcome === "requested") return;
+      pendingReportRef.current = false;
+      if (outcome === "failed") return;
+
+      try {
+        const refreshedSessions = await refreshSessions();
+        const finalizedSession = refreshedSessions.find(
+          (session) =>
+            session.sessionId === requestedSessionId &&
+            session.endedAt !== null &&
+            session.status !== "running",
+        );
+        if (finalizedSession) {
+          await generateAndOpen(finalizedSession.sessionId);
+          return;
+        }
+      } catch (error) {
+        const message = `Could not refresh sessions after the monitor stopped: ${String(error)}`;
+        pushLog(message);
+        showNotice("error", "Report unavailable", message);
+        return;
+      }
+
+      const message = requestedSessionId
+        ? `Session ${requestedSessionId} is not finalized yet. Wait for monitoring to finish, then generate the report again.`
+        : "The backend no longer has an active monitor and no finalized session matches this report request. Refresh Sessions and try again.";
+      pushLog(`Report not generated: ${message}`);
+      showNotice("warning", "Report not ready", message);
       return;
     }
     const target = sessions.find((session) => session.sessionId === currentSessionId) ?? sessions[0];
@@ -422,7 +460,7 @@ export function useMeterController() {
       return;
     }
     await generateAndOpen(target.sessionId);
-  }, [currentSessionId, generateAndOpen, pushLog, runtime, sessions, showNotice, stop]);
+  }, [currentSessionId, generateAndOpen, pushLog, refreshSessions, runtime, sessions, showNotice, stop]);
 
   const openSessionReport = useCallback(
     async (sessionId: string) => generateAndOpen(sessionId),
