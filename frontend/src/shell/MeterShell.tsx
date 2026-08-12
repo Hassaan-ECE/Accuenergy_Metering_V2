@@ -564,41 +564,47 @@ function SessionList({
   }
   return (
     <div className="space-y-2">
-      {sessions.map((session) => (
-        <div className="rounded-xl border border-border bg-muted/30 p-3" key={session.sessionId}>
-          <div className="flex items-start justify-between gap-2">
-            <div className="min-w-0">
-              <p className="truncate font-mono text-xs font-semibold" title={session.sessionId}>{session.sessionId}</p>
-              <p className="mt-1 text-[11px] text-muted-foreground">
-                {formatSessionTime(session.endedAt ?? session.startedAt)} · {session.sampleCount.toLocaleString()} samples · {session.errorCount} errors
-              </p>
+      {sessions.map((session) => {
+        const finalized = session.status !== "running" && session.endedAt !== null && session.sampleCount > 0;
+        return (
+          <div className="rounded-xl border border-border bg-muted/30 p-3" key={session.sessionId}>
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0">
+                <p className="truncate font-mono text-xs font-semibold" title={session.sessionId}>{session.sessionId}</p>
+                <p className="mt-1 text-[11px] text-muted-foreground">
+                  {formatSessionTime(session.endedAt ?? session.startedAt)} · {session.sampleCount.toLocaleString()} samples · {session.errorCount} errors
+                </p>
+              </div>
+              <span className={cn(
+                "rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase",
+                session.status === "error" && "bg-destructive/10 text-destructive-foreground",
+                session.status === "running" && "bg-warning/15 text-warning-foreground",
+                (session.status === "stopped" || session.status === "completed") && "bg-success/10 text-success-foreground",
+                !["error", "running", "stopped", "completed"].includes(session.status) && "bg-muted text-muted-foreground",
+              )}>{session.status}</span>
             </div>
-            <span className={cn(
-              "rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase",
-              session.status === "error" ? "bg-destructive/10 text-destructive-foreground" : "bg-success/10 text-success-foreground",
-            )}>{session.status}</span>
+            <div className="mt-2 flex gap-2">
+              <Button
+                disabled={loadingReview || !finalized}
+                onClick={() => onLoad(session.sessionId)}
+                size="xs"
+                variant="secondary"
+              >
+                <SearchCheck className="size-3.5" />
+                {loadingReview ? "Loading…" : "Review"}
+              </Button>
+              <Button disabled={reporting || !finalized} onClick={() => onReport(session.sessionId)} size="xs" variant="outline">
+                <FileChartColumnIncreasing className="size-3.5" />
+                Report
+              </Button>
+              <Button disabled={exportingSessionId !== null || !finalized} onClick={() => onExport(session.sessionId)} size="xs" variant="outline">
+                <Download className="size-3.5" />
+                {exportingSessionId === session.sessionId ? "Exporting…" : "CSV"}
+              </Button>
+            </div>
           </div>
-          <div className="mt-2 flex gap-2">
-            <Button
-              disabled={loadingReview || session.status === "running" || session.endedAt === null || session.sampleCount === 0}
-              onClick={() => onLoad(session.sessionId)}
-              size="xs"
-              variant="secondary"
-            >
-              <SearchCheck className="size-3.5" />
-              {loadingReview ? "Loading…" : "Review"}
-            </Button>
-            <Button disabled={reporting || session.sampleCount === 0} onClick={() => onReport(session.sessionId)} size="xs" variant="outline">
-              <FileChartColumnIncreasing className="size-3.5" />
-              Report
-            </Button>
-            <Button disabled={exportingSessionId !== null || session.sampleCount === 0} onClick={() => onExport(session.sessionId)} size="xs" variant="outline">
-              <Download className="size-3.5" />
-              {exportingSessionId === session.sessionId ? "Exporting…" : "CSV"}
-            </Button>
-          </div>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
