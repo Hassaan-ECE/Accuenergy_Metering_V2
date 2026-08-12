@@ -5,6 +5,7 @@ use tauri_plugin_opener::OpenerExt;
 
 use crate::{
     domain::config::AppConfig,
+    meter_config::{self, ApplyMeterDefaultsRequest, ApplyMeterDefaultsResult, MeterConfigPreview},
     meter_io::MeterSnapshot,
     monitor::{MonitorManager, MonitorState, StartMonitorResult},
     paths::AppPaths,
@@ -61,6 +62,41 @@ pub async fn test_rs485(app: AppHandle) -> Result<MeterSnapshot, String> {
     tauri::async_runtime::spawn_blocking(move || crate::meter_io::probe(&config))
         .await
         .map_err(|error| format!("RS485 test task failed: {error}"))
+}
+
+#[tauri::command]
+pub async fn preview_meter_defaults(
+    app: AppHandle,
+    manager: State<'_, MonitorManager>,
+    target_device_id: u8,
+    target_baudrate: u32,
+) -> Result<MeterConfigPreview, String> {
+    let configuration_guard = manager.begin_meter_configuration()?;
+    let paths = AppPaths::resolve(&app)?;
+    let config = AppConfig::load(&paths.settings)?.normalized()?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let _configuration_guard = configuration_guard;
+        meter_config::preview(&config, target_device_id, target_baudrate)
+    })
+    .await
+    .map_err(|error| format!("Meter configuration preview task failed: {error}"))?
+}
+
+#[tauri::command]
+pub async fn apply_meter_defaults(
+    app: AppHandle,
+    manager: State<'_, MonitorManager>,
+    request: ApplyMeterDefaultsRequest,
+) -> Result<ApplyMeterDefaultsResult, String> {
+    let configuration_guard = manager.begin_meter_configuration()?;
+    let paths = AppPaths::resolve(&app)?;
+    let config = AppConfig::load(&paths.settings)?.normalized()?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let _configuration_guard = configuration_guard;
+        meter_config::apply(&config, request, &paths.settings)
+    })
+    .await
+    .map_err(|error| format!("Meter configuration task failed: {error}"))?
 }
 
 #[tauri::command]

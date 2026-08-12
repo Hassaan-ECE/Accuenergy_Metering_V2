@@ -7,9 +7,11 @@ import {
   emptyValues,
   graphFromReviewReadings,
   type AppConfig,
+  type ApplyMeterDefaultsRequest,
   type GraphBuffer,
   type LiveUpdate,
   type MeterSnapshot,
+  type MeterConfigPreview,
   type MeterValues,
   type MonitorFailure,
   type MonitorLog,
@@ -20,6 +22,7 @@ import {
 } from "./types";
 import { useDemoLiveStream } from "./useDemoLiveStream";
 import {
+  applyMeterDefaults,
   exportSessionCsv,
   generateReport,
   getAppPaths,
@@ -31,6 +34,7 @@ import {
   loadCsvReview,
   loadSessionReview,
   openPath,
+  previewMeterDefaults,
   saveConfig,
   startMonitor,
   stopMonitor,
@@ -100,8 +104,11 @@ export function useMeterController() {
   const [exportingSessionId, setExportingSessionId] = useState<string | null>(null);
   const [review, setReview] = useState<ReviewDataset | null>(null);
   const [loadingReview, setLoadingReview] = useState(false);
+  const [meterConfigPreview, setMeterConfigPreview] = useState<MeterConfigPreview | null>(null);
+  const [meterConfigAction, setMeterConfigAction] = useState<"idle" | "preview" | "apply">("idle");
   const pendingReportRef = useRef(false);
   const runningRef = useRef(false);
+  const meterConfigActionRef = useRef<"idle" | "preview" | "apply">("idle");
   const allowCloseRef = useRef(false);
   const monitorEndWaiters = useRef(new Set<() => void>());
 
@@ -153,6 +160,10 @@ export function useMeterController() {
   useEffect(() => {
     runningRef.current = status === "connecting" || status === "running" || status === "stopping";
   }, [status]);
+
+  useEffect(() => {
+    meterConfigActionRef.current = meterConfigAction;
+  }, [meterConfigAction]);
 
   useEffect(() => {
     let cancelled = false;
@@ -324,7 +335,17 @@ export function useMeterController() {
       ]);
       const currentWindow = getCurrentWindow();
       const nextUnlisten = await currentWindow.onCloseRequested(async (event) => {
-        if (allowCloseRef.current || !runningRef.current) return;
+        if (allowCloseRef.current) return;
+        if (meterConfigActionRef.current !== "idle") {
+          event.preventDefault();
+          showNotice(
+            "warning",
+            "Meter configuration in progress",
+            "Wait for the serial read, write, and verification step to finish before closing the app.",
+          );
+          return;
+        }
+        if (!runningRef.current) return;
         event.preventDefault();
         const confirmed = await confirm("Monitoring is still running. Stop it and exit?", {
           title: "Accuenergy Metering",
@@ -350,7 +371,7 @@ export function useMeterController() {
       cancelled = true;
       unlisten?.();
     };
-  }, [config.retries, config.timeoutSeconds, runtime, stop]);
+  }, [config.retries, config.timeoutSeconds, runtime, showNotice, stop]);
 
   const test = useCallback(async (): Promise<MeterSnapshot | null> => {
     if (review) {
@@ -383,6 +404,100 @@ export function useMeterController() {
       setTesting(false);
     }
   }, [pushDemoLog, pushLog, review, runtime, showNotice]);
+
+  const previewMeterConfig = useCallback(
+    async (targetDeviceId: number, targetBaudrate: number): Promise<MeterConfigPreview | null> => {
+      if (review) {
+        showNotice("warning", "Review mode is read-only", "Exit review before configuring the meter.");
+        return null;
+      }
+      if (runningRef.current) {
+        showNotice("warning", "Monitoring is active", "Stop monitoring before configuring meter communication settings.");
+        return null;
+      }
+      if (runtime !== "desktop") {
+        showNotice("warning", "Desktop feature", "Meter configuration requires the desktop app and a serial connection.");
+        return null;
+      }
+      meterConfigActionRef.current = "preview";
+      setMeterConfigAction("preview");
+      setMeterConfigPreview(null);
+      try {
+        const preview = await previewMeterDefaults(targetDeviceId, targetBaudrate);
+        setMeterConfigPreview(preview);
+        preview.summary.split("\n").forEach((line) => pushLog(line));
+        showNotice("success", "Meter settings read", "Dry-run complete. Review the before/after registers before applying.");
+        return preview;
+      } catch (error) {
+        const message = String(error);
+        setMeterConfigPreview(null);
+        message.split("\n").forEach((line) => pushLog(line));
+        showNotice("error", "Could not read meter settings", message);
+        return null;
+      } finally {
+        meterConfigActionRef.current = "idle";
+        setMeterConfigAction("idle");
+      }
+    },
+    [pushLog, review, runtime, showNotice],
+  );
+
+  const applyMeterConfig = useCallback(
+    async (request: ApplyMeterDefaultsRequest): Promise<boolean> => {
+      if (review) {
+        showNotice("warning", "Review mode is read-only", "Exit review before configuring the meter.");
+        return false;
+      }
+      if (runningRef.current) {
+        showNotice("warning", "Monitoring is active", "Stop monitoring before configuring meter communication settings.");
+        return false;
+      }
+      if (runtime !== "desktop") return false;
+      if (!request.isolated) {
+        showNotice("warning", "Isolation required", "Isolate this meter from the RS485 daisy chain before applying.");
+        return false;
+      }
+      const { confirm } = await import("@tauri-apps/plugin-dialog");
+      const confirmed = await confirm(
+        `This writes the meter's communication registers and changes how it talks on the RS485 bus.\n\nTarget: device ${request.targetDeviceId}, ${request.targetBaudrate} baud, 8N1.\n\nConfirm the meter is isolated from the daisy chain before continuing.`,
+        {
+          title: "Configure meter communication",
+          kind: "warning",
+          okLabel: "Write and verify",
+          cancelLabel: "Cancel",
+        },
+      );
+      if (!confirmed) return false;
+
+      meterConfigActionRef.current = "apply";
+      setMeterConfigAction("apply");
+      try {
+        const result = await applyMeterDefaults(request);
+        result.summary.split("\n").forEach((line) => pushLog(line));
+        setConfig(result.config);
+        setProbeStatus(null);
+        setMeterConfigPreview(null);
+        showNotice(
+          "success",
+          "Meter configured and verified",
+          `The meter and app now use ${result.config.port}, device ${result.config.deviceId}, ${result.config.baudrate} baud, 8N1.`,
+        );
+        return true;
+      } catch (error) {
+        const message = String(error);
+        setMeterConfigPreview(null);
+        message.split("\n").forEach((line) => pushLog(line));
+        showNotice("error", "Meter configuration failed", message);
+        return false;
+      } finally {
+        meterConfigActionRef.current = "idle";
+        setMeterConfigAction("idle");
+      }
+    },
+    [pushLog, review, runtime, showNotice],
+  );
+
+  const clearMeterConfigPreview = useCallback(() => setMeterConfigPreview(null), []);
 
   const persistConfig = useCallback(
     async (nextConfig: AppConfig) => {
@@ -653,10 +768,15 @@ export function useMeterController() {
     reporting,
     exportingSessionId,
     loadingReview,
+    meterConfigPreview,
+    meterConfigAction,
     isRunning,
     start,
     stop,
     test,
+    previewMeterConfig,
+    applyMeterConfig,
+    clearMeterConfigPreview,
     persistConfig,
     updateTheme,
     refreshPorts,

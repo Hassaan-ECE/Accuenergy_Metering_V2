@@ -9,6 +9,7 @@ import {
   PanelRightOpen,
   Play,
   RefreshCw,
+  RadioTower,
   SearchCheck,
   Settings2,
   Square,
@@ -22,6 +23,7 @@ import { MetricCard } from "@/features/live/MetricCard";
 import { configSummary, type AppConfig, type MeterKey, type SessionRecord } from "@/features/live/types";
 import { useMeterController, type Notice } from "@/features/live/useMeterController";
 import { SettingsDialog } from "@/features/settings/SettingsDialog";
+import { MeterConfigDialog } from "@/features/settings/MeterConfigDialog";
 import { THEME_STORAGE_KEY } from "@/platform/ui/theme";
 import { Button } from "@/shared/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/shared/components/ui/card";
@@ -110,6 +112,7 @@ function readGraphSelection(): GraphMode[] {
 export function MeterShell() {
   const controller = useMeterController();
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [meterConfigOpen, setMeterConfigOpen] = useState(false);
   const [visibleGraphs, setVisibleGraphs] = useState<GraphMode[]>(readGraphSelection);
   const [showActivityPanel, setShowActivityPanel] = useState(readActivityPanelPreference);
   const [sideTab, setSideTab] = useState<"activity" | "sessions">("activity");
@@ -172,8 +175,12 @@ export function MeterShell() {
     });
   };
 
-  const statusText = controller.testing
-    ? "Testing…"
+  const statusText = controller.meterConfigAction === "apply"
+    ? "Configuring meter…"
+    : controller.meterConfigAction === "preview"
+      ? "Reading meter settings…"
+      : controller.testing
+        ? "Testing…"
     : controller.isReviewing
       ? "Review mode"
     : controller.probeStatus ??
@@ -196,7 +203,23 @@ export function MeterShell() {
         ? "Connecting to desktop backend…"
         : `${statusText} · ${DEVICE_MODEL} · ${DEVICE_PROTOCOL}`);
   const controlsBusy =
-    controller.testing || controller.reporting || controller.loadingReview || controller.runtime === "checking";
+    controller.testing ||
+    controller.reporting ||
+    controller.loadingReview ||
+    controller.meterConfigAction !== "idle" ||
+    controller.runtime === "checking";
+
+  const openMeterConfig = () => {
+    controller.clearMeterConfigPreview();
+    setMeterConfigOpen(true);
+    void controller.previewMeterConfig(1, 19_200);
+  };
+
+  const closeMeterConfig = () => {
+    if (controller.meterConfigAction !== "idle") return;
+    controller.clearMeterConfigPreview();
+    setMeterConfigOpen(false);
+  };
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-background text-foreground">
@@ -220,6 +243,14 @@ export function MeterShell() {
           <Button disabled={controller.isRunning || controller.isReviewing || controlsBusy} onClick={controller.test} variant="outline">
             <Wifi className={controller.testing ? "size-4 animate-pulse" : "size-4"} />
             {controller.testing ? "Testing…" : "Test RS485"}
+          </Button>
+          <Button
+            disabled={controller.isRunning || controller.isReviewing || controlsBusy || controller.runtime !== "desktop"}
+            onClick={openMeterConfig}
+            variant="outline"
+          >
+            <RadioTower className="size-4" />
+            Configure meter…
           </Button>
           <Button disabled={controller.isRunning || controlsBusy} onClick={() => setSettingsOpen(true)} variant="outline">
             <Settings2 className="size-4" />
@@ -444,6 +475,16 @@ export function MeterShell() {
           ports={controller.ports}
           refreshingPorts={controller.refreshingPorts}
           saving={controller.savingConfig}
+        />
+      ) : null}
+      {meterConfigOpen ? (
+        <MeterConfigDialog
+          action={controller.meterConfigAction}
+          config={controller.config}
+          onApply={controller.applyMeterConfig}
+          onClose={closeMeterConfig}
+          onPreview={controller.previewMeterConfig}
+          preview={controller.meterConfigPreview}
         />
       ) : null}
       {controller.notice ? <NoticeToast notice={controller.notice} onClose={controller.dismissNotice} /> : null}

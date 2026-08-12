@@ -1,5 +1,8 @@
 import type {
+  ApplyMeterDefaultsRequest,
+  ApplyMeterDefaultsResult,
   AppConfig,
+  MeterConfigPreview,
   MeterSnapshot,
   MonitorRuntimeState,
   ReviewDataset,
@@ -52,6 +55,14 @@ export function getAppPaths(): Promise<AppPaths> {
 
 export function testRs485(): Promise<MeterSnapshot> {
   return invokeCommand<MeterSnapshot>("test_rs485");
+}
+
+export function previewMeterDefaults(targetDeviceId: number, targetBaudrate: number): Promise<MeterConfigPreview> {
+  return invokeCommand<MeterConfigPreview>("preview_meter_defaults", { targetDeviceId, targetBaudrate });
+}
+
+export function applyMeterDefaults(request: ApplyMeterDefaultsRequest): Promise<ApplyMeterDefaultsResult> {
+  return invokeCommand<ApplyMeterDefaultsResult>("apply_meter_defaults", { request });
 }
 
 export function startMonitor(): Promise<StartMonitorResult> {

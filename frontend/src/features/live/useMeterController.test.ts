@@ -1,13 +1,20 @@
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { DEFAULT_CONFIG, emptyValues, type SessionRecord, type SessionSummary } from "./types";
+import {
+  DEFAULT_CONFIG,
+  emptyValues,
+  type MeterConfigPreview,
+  type SessionRecord,
+  type SessionSummary,
+} from "./types";
 import { useMeterController } from "./useMeterController";
 
 const mocks = vi.hoisted(() => {
   const listeners = new Map<string, (event: { payload: unknown }) => void>();
   return {
     listeners,
+    applyMeterDefaults: vi.fn(),
     exportSessionCsv: vi.fn(),
     generateReport: vi.fn(),
     getAppPaths: vi.fn(),
@@ -19,6 +26,7 @@ const mocks = vi.hoisted(() => {
     loadCsvReview: vi.fn(),
     loadSessionReview: vi.fn(),
     openPath: vi.fn(),
+    previewMeterDefaults: vi.fn(),
     saveConfig: vi.fn(),
     startMonitor: vi.fn(),
     stopMonitor: vi.fn(),
@@ -35,6 +43,7 @@ const mocks = vi.hoisted(() => {
 });
 
 vi.mock("@/integrations/tauri/meterBridge", () => ({
+  applyMeterDefaults: mocks.applyMeterDefaults,
   exportSessionCsv: mocks.exportSessionCsv,
   generateReport: mocks.generateReport,
   getAppPaths: mocks.getAppPaths,
@@ -46,6 +55,7 @@ vi.mock("@/integrations/tauri/meterBridge", () => ({
   loadCsvReview: mocks.loadCsvReview,
   loadSessionReview: mocks.loadSessionReview,
   openPath: mocks.openPath,
+  previewMeterDefaults: mocks.previewMeterDefaults,
   saveConfig: mocks.saveConfig,
   startMonitor: mocks.startMonitor,
   stopMonitor: mocks.stopMonitor,
@@ -90,6 +100,32 @@ function finishedSummary(sessionId = "run_unrelated"): SessionSummary {
   };
 }
 
+function meterConfigPreview(): MeterConfigPreview {
+  return {
+    registerStart: 0x0ffe,
+    registerCount: 5,
+    readFunctionCode: 0x03,
+    writeFunctionCode: 0x10,
+    defaultDeviceId: 1,
+    defaultBaudrate: 19_200,
+    before: {
+      protocol: 1,
+      parityCode: 0,
+      password: 4321,
+      deviceId: 9,
+      baudrate: 9600,
+    },
+    after: {
+      protocol: 0,
+      parityCode: 3,
+      password: 4321,
+      deviceId: 2,
+      baudrate: 19_200,
+    },
+    summary: "[PASS] Read FC 03H holding registers 0FFEH-1002H.\nBefore: [1, 0, 4321, 9, 9600]\nAfter: [0, 3, 4321, 2, 19200]",
+  };
+}
+
 async function renderRunningController(initialSessions: SessionRecord[]) {
   mocks.listSessions.mockResolvedValueOnce(initialSessions);
   mocks.getMonitorState.mockResolvedValue({ running: true, sessionId: "run_requested" });
@@ -124,6 +160,14 @@ beforeEach(() => {
   mocks.stopMonitor.mockResolvedValue(null);
   mocks.generateReport.mockResolvedValue("C:\\data\\reports\\report.html");
   mocks.exportSessionCsv.mockResolvedValue("C:\\data\\exports\\readings.csv");
+  mocks.previewMeterDefaults.mockResolvedValue(meterConfigPreview());
+  mocks.applyMeterDefaults.mockResolvedValue({
+    before: meterConfigPreview().before,
+    after: meterConfigPreview().after,
+    verified: meterConfigPreview().after,
+    config: { ...DEFAULT_CONFIG, port: "COM3", deviceId: 2 },
+    summary: "[PASS] FC 10H write accepted.\n[PASS] Verified target settings.\n[PASS] App settings updated.",
+  });
   mocks.loadSessionReview.mockResolvedValue({
     source: "session",
     sourceLabel: "C:\\data\\meter_log.db",
@@ -318,5 +362,98 @@ describe("CSV review", () => {
 
     expect(mocks.loadCsvReview).not.toHaveBeenCalled();
     expect(rendered.result.current.isReviewing).toBe(false);
+  });
+});
+
+describe("meter communication configuration", () => {
+  it("loads an exact dry-run preview without applying a write", async () => {
+    const rendered = renderHook(() => useMeterController());
+    await waitFor(() => expect(rendered.result.current.runtime).toBe("desktop"));
+
+    await act(async () => rendered.result.current.previewMeterConfig(2, 19_200));
+
+    expect(mocks.previewMeterDefaults).toHaveBeenCalledWith(2, 19_200);
+    expect(mocks.applyMeterDefaults).not.toHaveBeenCalled();
+    expect(rendered.result.current.meterConfigPreview).toMatchObject({
+      registerStart: 0x0ffe,
+      registerCount: 5,
+      writeFunctionCode: 0x10,
+      after: { password: 4321, deviceId: 2, baudrate: 19_200 },
+    });
+    expect(rendered.result.current.logLines.some((line) => line.includes("Before: [1, 0, 4321, 9, 9600]"))).toBe(true);
+  });
+
+  it("requires isolation before showing the destructive confirmation", async () => {
+    const rendered = renderHook(() => useMeterController());
+    await waitFor(() => expect(rendered.result.current.runtime).toBe("desktop"));
+
+    await act(async () => {
+      const applied = await rendered.result.current.applyMeterConfig({
+        targetDeviceId: 2,
+        targetBaudrate: 19_200,
+        isolated: false,
+      });
+      expect(applied).toBe(false);
+    });
+
+    expect(mocks.confirm).not.toHaveBeenCalled();
+    expect(mocks.applyMeterDefaults).not.toHaveBeenCalled();
+    expect(rendered.result.current.notice).toMatchObject({ tone: "warning", title: "Isolation required" });
+  });
+
+  it("does not write when the destructive confirmation is cancelled", async () => {
+    mocks.confirm.mockResolvedValueOnce(false);
+    const rendered = renderHook(() => useMeterController());
+    await waitFor(() => expect(rendered.result.current.runtime).toBe("desktop"));
+
+    await act(async () => {
+      const applied = await rendered.result.current.applyMeterConfig({
+        targetDeviceId: 2,
+        targetBaudrate: 19_200,
+        isolated: true,
+      });
+      expect(applied).toBe(false);
+    });
+
+    expect(mocks.confirm).toHaveBeenCalledTimes(1);
+    expect(mocks.applyMeterDefaults).not.toHaveBeenCalled();
+  });
+
+  it("uses only the backend-verified config after a confirmed apply", async () => {
+    mocks.confirm.mockResolvedValueOnce(true);
+    const rendered = renderHook(() => useMeterController());
+    await waitFor(() => expect(rendered.result.current.runtime).toBe("desktop"));
+
+    await act(async () => {
+      const applied = await rendered.result.current.applyMeterConfig({
+        targetDeviceId: 2,
+        targetBaudrate: 19_200,
+        isolated: true,
+      });
+      expect(applied).toBe(true);
+    });
+
+    expect(mocks.applyMeterDefaults).toHaveBeenCalledWith({
+      targetDeviceId: 2,
+      targetBaudrate: 19_200,
+      isolated: true,
+    });
+    expect(rendered.result.current.config).toMatchObject({ port: "COM3", deviceId: 2, baudrate: 19_200, parity: "N", stopBits: 1 });
+    expect(rendered.result.current.notice).toMatchObject({
+      tone: "success",
+      title: "Meter configured and verified",
+    });
+  });
+
+  it("blocks preview and apply while reviewing saved data", async () => {
+    const rendered = renderHook(() => useMeterController());
+    await waitFor(() => expect(rendered.result.current.runtime).toBe("desktop"));
+    await act(async () => rendered.result.current.loadReviewSession("run_requested"));
+
+    await act(async () => rendered.result.current.previewMeterConfig(1, 19_200));
+    await act(async () => rendered.result.current.applyMeterConfig({ targetDeviceId: 1, targetBaudrate: 19_200, isolated: true }));
+
+    expect(mocks.previewMeterDefaults).not.toHaveBeenCalled();
+    expect(mocks.applyMeterDefaults).not.toHaveBeenCalled();
   });
 });

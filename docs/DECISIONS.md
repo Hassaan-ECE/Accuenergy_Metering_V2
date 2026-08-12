@@ -1,6 +1,7 @@
 # Implementation decisions
 
 **Date:** August 11, 2026  
+**Updated:** August 12, 2026
 **Version:** 0.1.0
 
 ## Success criteria used
@@ -62,6 +63,9 @@ The implementation is considered software-complete when the persisted settings, 
 - Keep live/controller state underneath review mode rather than overwriting it. Exiting review therefore returns to the prior live-ready state without restarting the backend or mutating meter settings.
 - Parse imported CSV files in Rust against named columns from the app export format. Meter values and timestamps are required; session/config metadata is optional for compatibility, with the UI explicitly marking missing settings metadata.
 - Use the Tauri file picker for CSV selection, then pass the chosen path to the Rust parser. Imported files remain read-only and are never copied into SQLite or written back to the meter.
+- Port meter communication restore strictly from `C:\Projects\Active\Accuenergy_Metering_Legacy_2\Code\tools\meter_rs485_restore_defaults.py`: read holding registers `0x0FFE` through `0x1002` with FC03, preserve register `0x1000` (password), and write the full five-register block with FC10 only. Verification follows the legacy tool by checking protocol, parity, device ID, and baud while not requiring the password register to echo its readable pre-write value.
+- Require a successful dry-run read, explicit destructive confirmation, and an “isolated from the daisy chain” acknowledgement in the UI. The backend independently rejects concurrent monitoring/configuration operations and persists target 8N1 app settings only after reopening at the target ID/baud and verifying the complete block.
+- Keep target roles at device IDs 1 and 2 with 19200 baud as the dialog defaults. Automatic current-setting scans and password reset are deferred; operators must first enter the meter's current connection in Settings, matching the minimum safe Legacy_2 workflow.
 
 ## Verification boundary
 

@@ -1,5 +1,6 @@
 mod api;
 mod domain;
+mod meter_config;
 mod meter_io;
 mod monitor;
 mod paths;
@@ -20,6 +21,8 @@ pub fn run() {
             api::list_serial_ports,
             api::get_app_paths,
             api::test_rs485,
+            api::preview_meter_defaults,
+            api::apply_meter_defaults,
             api::start_monitor,
             api::stop_monitor,
             api::get_monitor_state,

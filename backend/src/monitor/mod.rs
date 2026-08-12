@@ -76,13 +76,31 @@ pub struct MonitorState {
 
 #[derive(Clone, Default)]
 pub struct MonitorManager {
-    active: Arc<Mutex<Option<ActiveMonitor>>>,
+    activity: Arc<Mutex<ManagerActivity>>,
+}
+
+#[derive(Default)]
+struct ManagerActivity {
+    monitor: Option<ActiveMonitor>,
+    meter_configuration: bool,
 }
 
 #[derive(Clone)]
 struct ActiveMonitor {
     session_id: String,
     stop: Arc<AtomicBool>,
+}
+
+pub(crate) struct MeterConfigurationGuard {
+    manager: MonitorManager,
+}
+
+impl Drop for MeterConfigurationGuard {
+    fn drop(&mut self) {
+        if let Ok(mut activity) = self.manager.activity.lock() {
+            activity.meter_configuration = false;
+        }
+    }
 }
 
 impl MonitorManager {
@@ -97,17 +115,23 @@ impl MonitorManager {
         let session_id = session_id(started_at);
         let stop = Arc::new(AtomicBool::new(false));
         {
-            let mut active = self
-                .active
+            let mut activity = self
+                .activity
                 .lock()
                 .map_err(|_| "Monitor state is unavailable.")?;
-            if let Some(current) = active.as_ref() {
+            if activity.meter_configuration {
+                return Err(
+                    "Meter communication configuration is in progress. Wait for it to finish before starting monitoring."
+                        .into(),
+                );
+            }
+            if let Some(current) = activity.monitor.as_ref() {
                 return Err(format!(
                     "A monitor session is already running: {}",
                     current.session_id
                 ));
             }
-            *active = Some(ActiveMonitor {
+            activity.monitor = Some(ActiveMonitor {
                 session_id: session_id.clone(),
                 stop: stop.clone(),
             });
@@ -162,11 +186,11 @@ impl MonitorManager {
     }
 
     pub fn stop(&self) -> Result<Option<String>, String> {
-        let active = self
-            .active
+        let activity = self
+            .activity
             .lock()
             .map_err(|_| "Monitor state is unavailable.")?;
-        if let Some(active) = active.as_ref() {
+        if let Some(active) = activity.monitor.as_ref() {
             active.stop.store(true, Ordering::SeqCst);
             Ok(Some(active.session_id.clone()))
         } else {
@@ -175,23 +199,50 @@ impl MonitorManager {
     }
 
     pub fn state(&self) -> Result<MonitorState, String> {
-        let active = self
-            .active
+        let activity = self
+            .activity
             .lock()
             .map_err(|_| "Monitor state is unavailable.")?;
         Ok(MonitorState {
-            running: active.is_some(),
-            session_id: active.as_ref().map(|monitor| monitor.session_id.clone()),
+            running: activity.monitor.is_some(),
+            session_id: activity
+                .monitor
+                .as_ref()
+                .map(|monitor| monitor.session_id.clone()),
+        })
+    }
+
+    pub(crate) fn begin_meter_configuration(&self) -> Result<MeterConfigurationGuard, String> {
+        let mut activity = self
+            .activity
+            .lock()
+            .map_err(|_| "Monitor state is unavailable.")?;
+        if let Some(active) = activity.monitor.as_ref() {
+            return Err(format!(
+                "Stop the active monitoring session {} before configuring meter communication settings.",
+                active.session_id
+            ));
+        }
+        if activity.meter_configuration {
+            return Err(
+                "Another meter communication configuration operation is already in progress."
+                    .into(),
+            );
+        }
+        activity.meter_configuration = true;
+        Ok(MeterConfigurationGuard {
+            manager: self.clone(),
         })
     }
 
     fn clear(&self, session_id: &str) {
-        if let Ok(mut active) = self.active.lock() {
-            if active
+        if let Ok(mut activity) = self.activity.lock() {
+            if activity
+                .monitor
                 .as_ref()
                 .is_some_and(|monitor| monitor.session_id == session_id)
             {
-                *active = None;
+                activity.monitor = None;
             }
         }
     }
@@ -438,7 +489,7 @@ fn runtime_failure(session_id: Option<&str>, message: String) -> MonitorFailure 
 
 #[cfg(test)]
 mod tests {
-    use super::{session_id, should_log_consecutive_error, status_message};
+    use super::{session_id, should_log_consecutive_error, status_message, MonitorManager};
     use crate::domain::meter::MeterValues;
     use chrono::Local;
 
@@ -463,5 +514,20 @@ mod tests {
             ..MeterValues::default()
         };
         assert_eq!(status_message(&values), "60.000 Hz  3.500 A1");
+    }
+
+    #[test]
+    fn meter_configuration_guard_is_exclusive_and_releases() {
+        let manager = MonitorManager::default();
+        let guard = manager.begin_meter_configuration().unwrap();
+        let error = match manager.begin_meter_configuration() {
+            Ok(_) => panic!("a second meter configuration guard must be rejected"),
+            Err(error) => error,
+        };
+        assert!(error.contains("already in progress"));
+
+        drop(guard);
+
+        assert!(manager.begin_meter_configuration().is_ok());
     }
 }

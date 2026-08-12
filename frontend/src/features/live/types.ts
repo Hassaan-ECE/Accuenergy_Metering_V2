@@ -146,6 +146,40 @@ export interface MeterSnapshot {
   summary: string;
 }
 
+export interface MeterCommSettings {
+  protocol: number;
+  parityCode: number;
+  password: number;
+  deviceId: number;
+  baudrate: number;
+}
+
+export interface MeterConfigPreview {
+  registerStart: number;
+  registerCount: number;
+  readFunctionCode: number;
+  writeFunctionCode: number;
+  defaultDeviceId: number;
+  defaultBaudrate: number;
+  before: MeterCommSettings;
+  after: MeterCommSettings;
+  summary: string;
+}
+
+export interface ApplyMeterDefaultsRequest {
+  targetDeviceId: number;
+  targetBaudrate: number;
+  isolated: boolean;
+}
+
+export interface ApplyMeterDefaultsResult {
+  before: MeterCommSettings;
+  after: MeterCommSettings;
+  verified: MeterCommSettings;
+  config: AppConfig;
+  summary: string;
+}
+
 export interface StartMonitorResult {
   sessionId: string;
   databasePath: string;
