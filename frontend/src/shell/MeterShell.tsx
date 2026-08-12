@@ -8,6 +8,7 @@ import {
   PanelRightOpen,
   Play,
   RefreshCw,
+  SearchCheck,
   Settings2,
   Square,
   Wifi,
@@ -172,6 +173,8 @@ export function MeterShell() {
 
   const statusText = controller.testing
     ? "Testing…"
+    : controller.isReviewing
+      ? "Review mode"
     : controller.probeStatus ??
       ({ idle: "Ready", connecting: "Connecting…", running: "Running", stopping: "Stopping…", error: "Error" }[
         controller.status
@@ -183,13 +186,16 @@ export function MeterShell() {
         ? "ok"
         : "normal";
   const statusMessage =
-    controller.latestUpdate?.message ??
+    (controller.review
+      ? `Reviewing ${controller.review.session.sessionId} · read-only · ${controller.review.readings.length.toLocaleString()} displayed of ${controller.review.originalReadingCount.toLocaleString()} readings`
+      : controller.latestUpdate?.message) ??
     (controller.runtime === "browser"
       ? "Browser demo mode · synthetic values · no serial I/O or files"
       : controller.runtime === "checking"
         ? "Connecting to desktop backend…"
         : `${statusText} · ${DEVICE_MODEL} · ${DEVICE_PROTOCOL}`);
-  const controlsBusy = controller.testing || controller.reporting || controller.runtime === "checking";
+  const controlsBusy =
+    controller.testing || controller.reporting || controller.loadingReview || controller.runtime === "checking";
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-background text-foreground">
@@ -202,7 +208,7 @@ export function MeterShell() {
 
       <main className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden px-3 py-3 sm:px-4">
         <section className="flex shrink-0 flex-wrap items-center gap-2 rounded-xl border border-border bg-card px-3 py-2 shadow-sm">
-          <Button disabled={controller.isRunning || controlsBusy} onClick={controller.start} variant="default">
+          <Button disabled={controller.isRunning || controller.isReviewing || controlsBusy} onClick={controller.start} variant="default">
             <Play className="size-4" />
             Start
           </Button>
@@ -210,7 +216,7 @@ export function MeterShell() {
             <Square className="size-4" />
             {controller.status === "stopping" ? "Stopping…" : "Stop"}
           </Button>
-          <Button disabled={controller.isRunning || controlsBusy} onClick={controller.test} variant="outline">
+          <Button disabled={controller.isRunning || controller.isReviewing || controlsBusy} onClick={controller.test} variant="outline">
             <Wifi className={controller.testing ? "size-4 animate-pulse" : "size-4"} />
             {controller.testing ? "Testing…" : "Test RS485"}
           </Button>
@@ -299,6 +305,23 @@ export function MeterShell() {
           </div>
         </section>
 
+        {controller.review ? (
+          <section className="flex shrink-0 items-center gap-3 rounded-xl border border-primary/25 bg-primary/8 px-3 py-2 shadow-sm">
+            <SearchCheck className="size-5 shrink-0 text-primary" />
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm font-semibold">
+                Reviewing session <span className="font-mono">{controller.review.session.sessionId}</span> (read-only)
+              </p>
+              <p className="truncate text-xs text-muted-foreground" title={configSummary(controller.review.session.config)}>
+                {configSummary(controller.review.session.config)} · {controller.review.sourceLabel}
+              </p>
+            </div>
+            <Button onClick={controller.exitReview} size="sm" variant="outline">
+              Exit review
+            </Button>
+          </section>
+        ) : null}
+
         <section className="grid shrink-0 grid-cols-2 gap-2 sm:grid-cols-4 md:grid-cols-7">
           <MetricCard label="Frequency" large unit="Hz" value={controller.values.frequency_hz} />
           <MetricCard label="V1" unit="V" value={controller.values.phase_voltage_v1} />
@@ -325,7 +348,7 @@ export function MeterShell() {
           <Card className="flex min-h-0 flex-col overflow-hidden">
             <CardHeader className="shrink-0 gap-2 pb-0">
               <div className="flex items-center justify-between gap-2">
-                <CardTitle>Live graphs</CardTitle>
+                <CardTitle>{controller.isReviewing ? "Review graphs" : "Live graphs"}</CardTitle>
                 <span className="text-[11px] text-muted-foreground">
                   {graphCards.length} group{graphCards.length === 1 ? "" : "s"} · aligned time window
                 </span>
@@ -386,7 +409,9 @@ export function MeterShell() {
                 <SessionList
                   exportingSessionId={controller.exportingSessionId}
                   onExport={controller.exportCsv}
+                  onLoad={controller.loadReviewSession}
                   onReport={controller.openSessionReport}
+                  loadingReview={controller.loadingReview}
                   reporting={controller.reporting}
                   sessions={controller.sessions}
                 />
@@ -466,13 +491,17 @@ function TabButton({ active, label, onClick }: { active: boolean; label: string;
 function SessionList({
   exportingSessionId,
   onExport,
+  onLoad,
   onReport,
+  loadingReview,
   reporting,
   sessions,
 }: {
   exportingSessionId: string | null;
   onExport: (sessionId: string) => Promise<void>;
+  onLoad: (sessionId: string) => Promise<void>;
   onReport: (sessionId: string) => Promise<void>;
+  loadingReview: boolean;
   reporting: boolean;
   sessions: SessionRecord[];
 }) {
@@ -496,6 +525,15 @@ function SessionList({
             )}>{session.status}</span>
           </div>
           <div className="mt-2 flex gap-2">
+            <Button
+              disabled={loadingReview || session.status === "running" || session.endedAt === null || session.sampleCount === 0}
+              onClick={() => onLoad(session.sessionId)}
+              size="xs"
+              variant="secondary"
+            >
+              <SearchCheck className="size-3.5" />
+              {loadingReview ? "Loading…" : "Review"}
+            </Button>
             <Button disabled={reporting || session.sampleCount === 0} onClick={() => onReport(session.sessionId)} size="xs" variant="outline">
               <FileChartColumnIncreasing className="size-3.5" />
               Report

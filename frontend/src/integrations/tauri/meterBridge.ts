@@ -2,6 +2,7 @@ import type {
   AppConfig,
   MeterSnapshot,
   MonitorRuntimeState,
+  ReviewDataset,
   SessionRecord,
   StartMonitorResult,
 } from "@/features/live/types";
@@ -71,6 +72,10 @@ export function listSessions(): Promise<SessionRecord[]> {
 
 export function getLatestSession(): Promise<SessionRecord | null> {
   return invokeCommand<SessionRecord | null>("get_latest_session");
+}
+
+export function loadSessionReview(sessionId: string): Promise<ReviewDataset> {
+  return invokeCommand<ReviewDataset>("load_session_review", { sessionId });
 }
 
 export function generateReport(sessionId: string): Promise<string> {

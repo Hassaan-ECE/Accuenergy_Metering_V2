@@ -83,6 +83,21 @@ export interface SessionRecord {
   config: AppConfig;
 }
 
+export interface ReviewReading {
+  sessionId: string;
+  tsUnix: number;
+  tsIso: string;
+  values: MeterValues;
+}
+
+export interface ReviewDataset {
+  source: "session" | "csv";
+  sourceLabel: string;
+  session: SessionRecord;
+  readings: ReviewReading[];
+  originalReadingCount: number;
+}
+
 export interface SessionSummary {
   sessionId: string;
   startedAt: string;
@@ -173,6 +188,15 @@ export function appendGraphPoint(graph: GraphBuffer, update: LiveUpdate, maximum
     times: times.slice(start),
     series: Object.fromEntries(
       METER_KEYS.map((key) => [key, series[key].slice(start)]),
+    ) as unknown as GraphBuffer["series"],
+  };
+}
+
+export function graphFromReviewReadings(readings: ReviewReading[]): GraphBuffer {
+  return {
+    times: readings.map((reading) => reading.tsUnix),
+    series: Object.fromEntries(
+      METER_KEYS.map((key) => [key, readings.map((reading) => reading.values[key])]),
     ) as unknown as GraphBuffer["series"],
   };
 }

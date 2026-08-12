@@ -8,7 +8,8 @@ use crate::domain::{config::AppConfig, meter::MeterValues};
 
 const READING_COLUMNS: &str = "session_id, ts_unix, ts_iso, frequency_hz, phase_voltage_v1, phase_voltage_v2, phase_voltage_v3, line_voltage_v12, current_i1, current_i2, current_i3, active_power_p1, power_factor_pf1";
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ReadingRow {
     pub session_id: String,
     pub ts_unix: f64,

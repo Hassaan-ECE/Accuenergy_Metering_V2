@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
 
-import { appendGraphPoint, configSummary, DEFAULT_CONFIG, emptyGraph, emptyValues, validateConfig } from "./types";
+import {
+  appendGraphPoint,
+  configSummary,
+  DEFAULT_CONFIG,
+  emptyGraph,
+  emptyValues,
+  graphFromReviewReadings,
+  validateConfig,
+} from "./types";
 
 describe("meter config", () => {
   it("summarizes lab defaults", () => {
@@ -37,5 +45,28 @@ describe("live graph buffer", () => {
     expect(graph.series.frequency_hz).toEqual([61, 62, 63]);
     expect(graph.series.current_i1).toEqual([2, 3, 4]);
     expect(graph.series.phase_voltage_v1).toEqual([null, null, null]);
+  });
+});
+
+describe("review graph buffer", () => {
+  it("converts saved readings into aligned graph series", () => {
+    const graph = graphFromReviewReadings([
+      {
+        sessionId: "run_review",
+        tsUnix: 10,
+        tsIso: "2026-08-12T10:00:00Z",
+        values: { ...emptyValues(), frequency_hz: 60, current_i1: 2 },
+      },
+      {
+        sessionId: "run_review",
+        tsUnix: 11,
+        tsIso: "2026-08-12T10:00:01Z",
+        values: { ...emptyValues(), frequency_hz: 60.1, current_i1: 2.1 },
+      },
+    ]);
+
+    expect(graph.times).toEqual([10, 11]);
+    expect(graph.series.frequency_hz).toEqual([60, 60.1]);
+    expect(graph.series.current_i1).toEqual([2, 2.1]);
   });
 });

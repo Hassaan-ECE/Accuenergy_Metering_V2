@@ -5,6 +5,7 @@ import {
   DEFAULT_CONFIG,
   emptyGraph,
   emptyValues,
+  graphFromReviewReadings,
   type AppConfig,
   type GraphBuffer,
   type LiveUpdate,
@@ -13,6 +14,7 @@ import {
   type MonitorFailure,
   type MonitorLog,
   type MonitorStatus,
+  type ReviewDataset,
   type SessionRecord,
   type SessionSummary,
 } from "./types";
@@ -26,6 +28,7 @@ import {
   isTauriRuntime,
   listSerialPorts,
   listSessions,
+  loadSessionReview,
   openPath,
   saveConfig,
   startMonitor,
@@ -94,6 +97,8 @@ export function useMeterController() {
   const [refreshingPorts, setRefreshingPorts] = useState(false);
   const [reporting, setReporting] = useState(false);
   const [exportingSessionId, setExportingSessionId] = useState<string | null>(null);
+  const [review, setReview] = useState<ReviewDataset | null>(null);
+  const [loadingReview, setLoadingReview] = useState(false);
   const pendingReportRef = useRef(false);
   const runningRef = useRef(false);
   const allowCloseRef = useRef(false);
@@ -252,6 +257,10 @@ export function useMeterController() {
   }, [generateAndOpen, pushLog, refreshSessions, resolveMonitorEnd, runtime, showNotice]);
 
   const start = useCallback(async () => {
+    if (review) {
+      showNotice("warning", "Review mode is read-only", "Exit review before starting a new monitoring session.");
+      return;
+    }
     if (runtime === "browser") {
       startDemo();
       return;
@@ -275,7 +284,7 @@ export function useMeterController() {
       pushLog(`Could not start monitor: ${String(error)}`);
       showNotice("error", "Could not start monitor", String(error));
     }
-  }, [config.baudrate, config.port, pushLog, runtime, showNotice, startDemo]);
+  }, [config.baudrate, config.port, pushLog, review, runtime, showNotice, startDemo]);
 
   const stop = useCallback(async (): Promise<StopOutcome> => {
     if (runtime === "browser") {
@@ -343,6 +352,10 @@ export function useMeterController() {
   }, [config.retries, config.timeoutSeconds, runtime, stop]);
 
   const test = useCallback(async (): Promise<MeterSnapshot | null> => {
+    if (review) {
+      showNotice("warning", "Review mode is read-only", "Exit review before testing the meter connection.");
+      return null;
+    }
     if (runtime !== "desktop") {
       pushDemoLog("RS485 testing is only available in the desktop app.");
       return null;
@@ -368,7 +381,7 @@ export function useMeterController() {
     } finally {
       setTesting(false);
     }
-  }, [pushDemoLog, pushLog, runtime, showNotice]);
+  }, [pushDemoLog, pushLog, review, runtime, showNotice]);
 
   const persistConfig = useCallback(
     async (nextConfig: AppConfig) => {
@@ -419,6 +432,10 @@ export function useMeterController() {
       showNotice("warning", "Desktop feature", "Reports are generated from SQLite sessions in the desktop app.");
       return;
     }
+    if (review?.source === "csv") {
+      showNotice("warning", "Report unavailable", "Imported CSV data is read-only and is not linked to a database session.");
+      return;
+    }
     if (runningRef.current) {
       const requestedSessionId = currentSessionId;
       pendingReportRef.current = true;
@@ -454,13 +471,14 @@ export function useMeterController() {
       showNotice("warning", "Report not ready", message);
       return;
     }
-    const target = sessions.find((session) => session.sessionId === currentSessionId) ?? sessions[0];
+    const target =
+      review?.session ?? sessions.find((session) => session.sessionId === currentSessionId) ?? sessions[0];
     if (!target) {
       showNotice("warning", "No session available", "Complete a monitoring session before generating a report.");
       return;
     }
     await generateAndOpen(target.sessionId);
-  }, [currentSessionId, generateAndOpen, pushLog, refreshSessions, runtime, sessions, showNotice, stop]);
+  }, [currentSessionId, generateAndOpen, pushLog, refreshSessions, review, runtime, sessions, showNotice, stop]);
 
   const openSessionReport = useCallback(
     async (sessionId: string) => generateAndOpen(sessionId),
@@ -487,7 +505,12 @@ export function useMeterController() {
   );
 
   const exportCurrentCsv = useCallback(async () => {
+    if (review?.source === "csv") {
+      showNotice("warning", "Already reviewing CSV", "The loaded data is already an exported CSV file.");
+      return;
+    }
     const target =
+      review?.session ??
       sessions.find(
         (session) =>
           session.sessionId === currentSessionId &&
@@ -500,7 +523,41 @@ export function useMeterController() {
       return;
     }
     await exportCsv(target.sessionId);
-  }, [currentSessionId, exportCsv, sessions, showNotice]);
+  }, [currentSessionId, exportCsv, review, sessions, showNotice]);
+
+  const loadReviewSession = useCallback(
+    async (sessionId: string) => {
+      if (runtime !== "desktop") {
+        showNotice("warning", "Desktop feature", "Saved session review is available in the desktop app.");
+        return;
+      }
+      if (runningRef.current) {
+        showNotice("warning", "Monitoring is active", "Stop monitoring before loading a saved session.");
+        return;
+      }
+      setLoadingReview(true);
+      try {
+        const dataset = await loadSessionReview(sessionId);
+        setReview(dataset);
+        pushLog(
+          `Reviewing ${dataset.session.sessionId}: ${dataset.readings.length.toLocaleString()} displayed of ${dataset.originalReadingCount.toLocaleString()} readings.`,
+        );
+        showNotice("success", "Session loaded", `${dataset.session.sessionId} is open in read-only review mode.`);
+      } catch (error) {
+        pushLog(`Session review failed: ${String(error)}`);
+        showNotice("error", "Could not load session", String(error));
+      } finally {
+        setLoadingReview(false);
+      }
+    },
+    [pushLog, runtime, showNotice],
+  );
+
+  const exitReview = useCallback(() => {
+    if (!review) return;
+    pushLog(`Exited review mode for ${review.session.sessionId}.`);
+    setReview(null);
+  }, [pushLog, review]);
 
   const openDataPath = useCallback(
     async (path: string | null | undefined) => {
@@ -517,18 +574,20 @@ export function useMeterController() {
   const dismissNotice = useCallback(() => setNotice(null), []);
 
   const usingDemo = runtime === "browser";
+  const reviewGraph = useMemo(() => (review ? graphFromReviewReadings(review.readings) : null), [review]);
+  const reviewValues = review?.readings.at(-1)?.values ?? null;
   const activeStatus = usingDemo ? demo.status : status;
-  const activeValues = usingDemo ? demo.values : values;
-  const activeGraph = usingDemo ? demo.graph : graph;
-  const activeLatest = usingDemo ? demo.latest : latestUpdate;
-  const activeSampleCount = usingDemo ? demo.sampleCount : sampleCount;
-  const activeErrorCount = usingDemo ? demo.errorCount : errorCount;
-  const activeLiveHz = usingDemo ? demo.liveHz : liveHz;
+  const activeValues = reviewValues ?? (usingDemo ? demo.values : values);
+  const activeGraph = reviewGraph ?? (usingDemo ? demo.graph : graph);
+  const activeLatest = review ? null : usingDemo ? demo.latest : latestUpdate;
+  const activeSampleCount = review ? review.session.sampleCount : usingDemo ? demo.sampleCount : sampleCount;
+  const activeErrorCount = review ? review.session.errorCount : usingDemo ? demo.errorCount : errorCount;
+  const activeLiveHz = review ? 0 : usingDemo ? demo.liveHz : liveHz;
   const activeLogs = usingDemo ? demo.logLines : logLines;
   const isRunning = activeStatus === "connecting" || activeStatus === "running" || activeStatus === "stopping";
   const latestSession = useMemo(
-    () => sessions.find((session) => session.sessionId === currentSessionId) ?? sessions[0] ?? null,
-    [currentSessionId, sessions],
+    () => review?.session ?? sessions.find((session) => session.sessionId === currentSessionId) ?? sessions[0] ?? null,
+    [currentSessionId, review, sessions],
   );
 
   return {
@@ -538,6 +597,8 @@ export function useMeterController() {
     paths,
     sessions,
     latestSession,
+    review,
+    isReviewing: review !== null,
     status: activeStatus,
     values: activeValues,
     graph: activeGraph,
@@ -546,7 +607,7 @@ export function useMeterController() {
     errorCount: activeErrorCount,
     liveHz: activeLiveHz,
     logLines: activeLogs,
-    currentSessionId: usingDemo ? demo.latest?.sessionId ?? null : currentSessionId,
+    currentSessionId: review?.session.sessionId ?? (usingDemo ? demo.latest?.sessionId ?? null : currentSessionId),
     lastReportPath,
     probeStatus,
     notice,
@@ -555,6 +616,7 @@ export function useMeterController() {
     refreshingPorts,
     reporting,
     exportingSessionId,
+    loadingReview,
     isRunning,
     start,
     stop,
@@ -567,6 +629,8 @@ export function useMeterController() {
     openSessionReport,
     exportCsv,
     exportCurrentCsv,
+    loadReviewSession,
+    exitReview,
     openDataPath,
     dismissNotice,
   };

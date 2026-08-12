@@ -58,6 +58,8 @@ The implementation is considered software-complete when the persisted settings, 
 - Size each uPlot from its actual tile and reserve explicit bottom-axis space and padding so timestamp labels remain visible in one- and multi-graph layouts.
 - Put a one-click Export CSV action beside Report. It selects the current finalized session when possible, otherwise the latest finalized session with readings.
 - Repeat finalized session metadata (`started_at`, `ended_at`, `status`, and serialized `config_json`) on each CSV data row. This stays spreadsheet-friendly while making each exported file self-contained for the later CSV review slice.
+- Load finalized SQLite sessions through a dedicated read-only review payload containing session metadata and readings. Display at most 12,000 evenly sampled points while preserving first and last readings; retain the original sample count in the UI.
+- Keep live/controller state underneath review mode rather than overwriting it. Exiting review therefore returns to the prior live-ready state without restarting the backend or mutating meter settings.
 
 ## Verification boundary
 

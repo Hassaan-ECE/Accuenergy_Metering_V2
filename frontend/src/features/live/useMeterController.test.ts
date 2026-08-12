@@ -1,7 +1,7 @@
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { DEFAULT_CONFIG, type SessionRecord, type SessionSummary } from "./types";
+import { DEFAULT_CONFIG, emptyValues, type SessionRecord, type SessionSummary } from "./types";
 import { useMeterController } from "./useMeterController";
 
 const mocks = vi.hoisted(() => {
@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => {
     isTauriRuntime: vi.fn(),
     listSerialPorts: vi.fn(),
     listSessions: vi.fn(),
+    loadSessionReview: vi.fn(),
     openPath: vi.fn(),
     saveConfig: vi.fn(),
     startMonitor: vi.fn(),
@@ -40,6 +41,7 @@ vi.mock("@/integrations/tauri/meterBridge", () => ({
   isTauriRuntime: mocks.isTauriRuntime,
   listSerialPorts: mocks.listSerialPorts,
   listSessions: mocks.listSessions,
+  loadSessionReview: mocks.loadSessionReview,
   openPath: mocks.openPath,
   saveConfig: mocks.saveConfig,
   startMonitor: mocks.startMonitor,
@@ -119,6 +121,25 @@ beforeEach(() => {
   mocks.stopMonitor.mockResolvedValue(null);
   mocks.generateReport.mockResolvedValue("C:\\data\\reports\\report.html");
   mocks.exportSessionCsv.mockResolvedValue("C:\\data\\exports\\readings.csv");
+  mocks.loadSessionReview.mockResolvedValue({
+    source: "session",
+    sourceLabel: "C:\\data\\meter_log.db",
+    session: session({
+      endedAt: "2026-08-12T01:01:00-04:00",
+      status: "completed",
+      stopReason: "Run duration reached",
+      sampleCount: 2,
+    }),
+    readings: [
+      {
+        sessionId: "run_requested",
+        tsUnix: 1,
+        tsIso: "2026-08-12T01:00:00-04:00",
+        values: { ...emptyValues(), frequency_hz: 60 },
+      },
+    ],
+    originalReadingCount: 2,
+  });
   mocks.openPath.mockResolvedValue(undefined);
   mocks.onCloseRequested.mockResolvedValue(() => undefined);
   mocks.confirm.mockResolvedValue(false);
@@ -213,5 +234,35 @@ describe("CSV export", () => {
       tone: "success",
       title: "CSV exported",
     });
+  });
+});
+
+describe("database session review", () => {
+  it("loads saved values read-only and restores live-ready state on exit", async () => {
+    const finalizedSession = session({
+      endedAt: "2026-08-12T01:01:00-04:00",
+      status: "completed",
+      stopReason: "Run duration reached",
+      sampleCount: 2,
+    });
+    mocks.listSessions.mockResolvedValue([finalizedSession]);
+    const rendered = renderHook(() => useMeterController());
+    await waitFor(() => expect(rendered.result.current.currentSessionId).toBe("run_requested"));
+
+    await act(async () => rendered.result.current.loadReviewSession("run_requested"));
+
+    expect(mocks.loadSessionReview).toHaveBeenCalledWith("run_requested");
+    expect(rendered.result.current.isReviewing).toBe(true);
+    expect(rendered.result.current.values.frequency_hz).toBe(60);
+    expect(rendered.result.current.graph.times).toEqual([1]);
+
+    await act(async () => rendered.result.current.start());
+    await act(async () => rendered.result.current.test());
+    expect(mocks.startMonitor).not.toHaveBeenCalled();
+    expect(mocks.testRs485).not.toHaveBeenCalled();
+
+    act(() => rendered.result.current.exitReview());
+    expect(rendered.result.current.isReviewing).toBe(false);
+    expect(rendered.result.current.graph.times).toEqual([]);
   });
 });

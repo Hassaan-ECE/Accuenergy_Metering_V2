@@ -4,6 +4,7 @@ mod meter_io;
 mod monitor;
 mod paths;
 mod report;
+mod review;
 mod storage;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -25,6 +26,7 @@ pub fn run() {
             api::generate_report,
             api::list_sessions,
             api::get_latest_session,
+            api::load_session_review,
             api::export_session_csv,
             api::open_path,
         ])

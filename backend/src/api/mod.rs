@@ -9,6 +9,7 @@ use crate::{
     monitor::{MonitorManager, MonitorState, StartMonitorResult},
     paths::AppPaths,
     report,
+    review::{self, ReviewDataset},
     storage::{self, SessionRecord},
 };
 
@@ -103,6 +104,17 @@ pub fn list_sessions(app: AppHandle) -> Result<Vec<SessionRecord>, String> {
 pub fn get_latest_session(app: AppHandle) -> Result<Option<SessionRecord>, String> {
     let paths = AppPaths::resolve(&app)?;
     storage::get_latest_session(&paths.database)
+}
+
+#[tauri::command]
+pub async fn load_session_review(
+    app: AppHandle,
+    session_id: String,
+) -> Result<ReviewDataset, String> {
+    let paths = AppPaths::resolve(&app)?;
+    tauri::async_runtime::spawn_blocking(move || review::load_session(&paths, &session_id))
+        .await
+        .map_err(|error| format!("Session review task failed: {error}"))?
 }
 
 #[tauri::command]
