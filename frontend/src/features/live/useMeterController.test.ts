@@ -350,6 +350,14 @@ describe("monitor start lifecycle", () => {
   });
 
   it("clears a connection-failed ghost session id", async () => {
+    const olderFinalized = session({
+      sessionId: "run_older",
+      endedAt: "2026-08-12T01:01:00-04:00",
+      status: "completed",
+      stopReason: "Run duration reached",
+      sampleCount: 10,
+    });
+    mocks.listSessions.mockResolvedValue([olderFinalized]);
     mocks.startMonitor.mockResolvedValueOnce({
       sessionId: "run_ghost",
       databasePath: "C:\\data\\meter_log.db",
@@ -368,6 +376,13 @@ describe("monitor start lifecycle", () => {
 
     await waitFor(() => expect(rendered.result.current.currentSessionId).toBeNull());
     expect(rendered.result.current.status).toBe("error");
+
+    await act(async () => rendered.result.current.openReport());
+    expect(mocks.generateReport).not.toHaveBeenCalled();
+    expect(rendered.result.current.notice).toMatchObject({
+      tone: "warning",
+      title: "No finalized session selected",
+    });
   });
 
   it("does not fall back to an older report when the selected id is not finalized", async () => {

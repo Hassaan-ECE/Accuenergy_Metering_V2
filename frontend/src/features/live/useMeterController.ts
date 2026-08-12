@@ -133,6 +133,14 @@ export function useMeterController() {
     return next;
   }, []);
 
+  const refreshSessionsPreservingSelection = useCallback(async () => {
+    const next = await listSessions();
+    setSessions(next);
+    const latest = next.find((session) => session.endedAt !== null) ?? null;
+    if (latest) setLastReportPath(latest.reportPath);
+    return next;
+  }, []);
+
   const generateAndOpen = useCallback(
     async (sessionId: string) => {
       setReporting(true);
@@ -289,7 +297,7 @@ export function useMeterController() {
           }
           pushLog(`${payload.kind === "connection" ? "Connection" : "Monitoring"} error: ${payload.message}`);
           showNotice("error", payload.kind === "connection" ? "Meter not connected" : "Monitoring failed", payload.message);
-          void refreshSessions();
+          void (payload.kind === "connection" ? refreshSessionsPreservingSelection() : refreshSessions());
         }),
       ]);
       if (cancelled) next.forEach((unlisten) => unlisten());
@@ -299,7 +307,7 @@ export function useMeterController() {
       cancelled = true;
       unlisteners.forEach((unlisten) => unlisten());
     };
-  }, [generateAndOpen, pushLog, refreshSessions, resolveMonitorEnd, runtime, showNotice]);
+  }, [generateAndOpen, pushLog, refreshSessions, refreshSessionsPreservingSelection, resolveMonitorEnd, runtime, showNotice]);
 
   const start = useCallback(async () => {
     if (review) {
