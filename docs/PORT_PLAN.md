@@ -1,7 +1,7 @@
 # Port plan — Accuenergy Metering → Tauri / Rust / Bun / React
 
 **Status:** software implementation complete; live meter validation pending
-**Date:** 2026-08-11  
+**Date:** 2026-08-12
 **Legacy reference:** `C:\Projects\Active\Accuenergy_Metering_Legacy` (clone of GitHub repo)  
 **UI reference:** `C:\Projects\Active\Inventory_Management` (shell, theme tokens, Button/Card patterns, release discipline)  
 **New app:** `C:\Projects\Active\Accuenergy_Metering`
@@ -27,8 +27,8 @@ Replace the Python/PySide6 app with a **desktop product** that:
 | Legacy repo cloned and source read | **Verified** |
 | Register map + float decode extracted into Rust | **Verified** (known 60.0f decode test) |
 | Inventory UI patterns reused (theme CSS, cards, shell) | **Verified** |
-| Frontend lint/tests/production build | **Verified** on August 11, 2026 |
-| Rust formatting/tests | **Verified** (10 tests) on August 11, 2026 |
+| Frontend lint/tests/production build | **Verified** on August 12, 2026 |
+| Rust formatting/tests | **Verified** (35 tests) on August 12, 2026 |
 | Full Tauri dev launch | **Verified**; responsive `Accuenergy Metering v0.1.0` window |
 | Real COM/Modbus round-trip from Rust | **Not verified** — no serial ports were attached |
 | Register access strategy | **Implemented as sequential two-register reads**, matching Python |
@@ -126,7 +126,7 @@ Focus: parity with `report.py`, better ergonomics.
 
 - [x] Product-specific waveform icon with reproducible SVG/Python sources
 - [x] Confirm, stop, flush, and finalize on window close while monitoring
-- [ ] Logging to file under app data
+- [x] Rotating app log under app data (`logs\app.log`, 5 MB)
 - [x] Version triple: `package.json` / `Cargo.toml` / `tauri.conf.json`
 - [ ] Signed NSIS when ready for team (product-specific updater key under `%USERPROFILE%\.tauri\`)
 - [ ] S-drive staging: `S:\Engineering\Public\Syed_Hassaan_Shah\Accuenergy_Metering\` (or agreed name)
@@ -145,10 +145,15 @@ Focus: parity with `report.py`, better ergonomics.
 | `get_config` / `save_config` | FE ↔ BE | camelCase JSON |
 | `list_serial_ports` | FE → BE | `{ name, description? }[]` |
 | `test_rs485` | FE → BE | snapshot string or structured JSON |
-| `start_monitor` / `stop_monitor` | FE → BE | single active session |
+| `preview_meter_defaults` | FE → BE | Dry-run read of `0x0FFE` × 5 |
+| `apply_meter_defaults` | FE → BE | Isolated FC10 write, verify, then save settings |
+| `start_monitor` / `stop_monitor` / `get_monitor_state` | FE ↔ BE | Single active session and lifecycle reconciliation |
+| `recover_orphaned_sessions` | FE → BE | Finalize leftover `running` rows when no monitor is alive |
 | `generate_report` | FE → BE | session id → path |
 | `list_sessions` / `get_latest_session` | FE → BE | Session history |
 | `export_session_csv` | FE → BE | Session id → CSV path |
+| `load_session_review` | FE → BE | Finalized SQLite session, downsampled for review |
+| `load_csv_review` | FE → BE | Export-format CSV, parsed read-only |
 | `open_path` | FE → BE | Restricted to app-data files/folders |
 
 ### Events

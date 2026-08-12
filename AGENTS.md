@@ -12,6 +12,8 @@ Read before non-trivial work:
 
 - `docs/LEGACY_ANALYSIS.md` — what the old app did
 - `docs/PORT_PLAN.md` — phases and IPC contract
+- `docs/DECISIONS.md` — behavior and verification boundaries
+- `docs/REVIEW_FIX_PASS.md` — completed reliability review pass
 
 UI/release conventions: mirror `Inventory_Management` (not its domain).
 
@@ -22,18 +24,18 @@ UI/release conventions: mirror `Inventory_Management` (not its domain).
 | Name | Accuenergy Metering |
 | Package | `accuenergy-metering` `0.1.0` |
 | Tauri id | `com.accuenergy.metering` |
-| Local data (planned) | `%LOCALAPPDATA%\com.accuenergy.metering\` |
+| Local data | `%LOCALAPPDATA%\com.accuenergy.metering\` |
 
 ## Stack
 
-Tauri 2, React 19, TypeScript, Vite, Tailwind v4, Bun, Rust.  
-Live graphs: **uPlot**. Storage (planned): **SQLite** (not FeOx).  
-Serial (planned): `serialport` + Modbus RTU client.
+Tauri 2, React 19, TypeScript, Vite, Tailwind v4, Bun, Rust.
+Live graphs: **uPlot**. Storage: bundled **SQLite** (not FeOx).
+Serial: `serialport` + Modbus RTU client.
 
 ## Current phase
 
-**Phase 0 scaffold.** Frontend has a demo live stream. Rust commands are stubs except domain decode + config types.  
-Do not claim RS485/Modbus works without a live COM smoke test.
+The software port is feature-complete for the legacy workflow plus session review, CSV import/export, and isolated meter communication restore. The desktop backend owns serial I/O, monitoring, SQLite, reports, orphan recovery, and the rotating app log; browser mode remains demo-only.
+Do not claim live RS485/Modbus validation in any session that did not complete a real COM smoke test against a meter.
 
 ## Commands
 

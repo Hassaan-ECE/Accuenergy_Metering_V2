@@ -72,9 +72,12 @@ Runtime data is stored under:
   meter_log.db
   reports\
   exports\
+  logs\app.log
 ```
 
 The database uses SQLite WAL mode. A reading row is written only when at least one metric decodes successfully; a full miss increments the error count without inserting a row.
+
+An invalid `settings.json` is surfaced as an error instead of silently resetting the connection to COM5/device 1. Leftover `running` sessions are finalized on the next desktop launch when no monitor is active, with their committed readings preserved.
 
 ## Lab workflow
 
@@ -84,8 +87,20 @@ The database uses SQLite WAL mode. A reading row is written only when at least o
 4. Run `Stop`; verify the session count and finalized status.
 5. Generate the HTML report, export CSV, and inspect `meter_log.db`.
 
+## USB–RS485 (FTDI) drivers for other PCs
+
+If Device Manager shows **FT232R USB UART** with **Code 28** / no COMx port, install the VCP kit:
+
+| | Path |
+|--|------|
+| **Team (use this on other machines)** | `S:\Engineering\Public\Syed_Hassaan_Shah\Accuenergy_Metering\drivers\FTDI_VCP\` |
+| Local copy | `release-support\drivers\FTDI_VCP\` (gitignored; not in GitHub) |
+
+Run `CDM21228_Setup.exe` as Administrator, then set the new **COMx** in Settings. Full steps and SHA256: `README.md` in that folder.
+
 ## Lab defaults
 
-COM5 · 19200 8N1 · device ID 1 · 1 Hz sample · 24 hour run
+Serial: **19200 8N1** · device ID **1** · 1 Hz sample · 24 hour run.
+**COM number is PC-specific** (this lab PC used **COM3** after FTDI install; app default may still say COM5 until you save Settings).
 
 `sample_hz = 0` means maximum bus speed. `run_hours = 0` means run until stopped.

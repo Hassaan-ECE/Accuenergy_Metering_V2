@@ -34,7 +34,7 @@ The implementation is considered software-complete when the persisted settings, 
 ## Storage and paths
 
 - Use bundled SQLite with WAL, `synchronous=NORMAL`, and a five-second busy timeout.
-- Store settings, database, reports, and exports under `%LOCALAPPDATA%\com.accuenergy.metering\`.
+- Store settings, database, reports, exports, and `logs\app.log` under `%LOCALAPPDATA%\com.accuenergy.metering\`.
 - Persist the normalized config JSON on every session record.
 - Restrict `open_path` to files and folders inside the app-data root.
 
@@ -57,7 +57,7 @@ The implementation is considered software-complete when the persisted settings, 
 - Tile Frequency, Voltage, Current, and combined Power/PF uPlot groups inside one fixed graph region. All visible plots share the same aligned time buffer and update with `setData`; no chart-library replacement or per-sample React remount is used.
 - Keep at least one graph group selected. Persist visible graph groups and the Log & sessions panel preference in local storage because these are workstation UI preferences rather than meter/session configuration.
 - Size each uPlot from its actual tile and reserve explicit bottom-axis space and padding so timestamp labels remain visible in one- and multi-graph layouts.
-- Put a one-click Export CSV action beside Report. It selects the current finalized session when possible, otherwise the latest finalized session with readings.
+- Put a one-click Export CSV action beside Report. It uses the explicitly current finalized session and never silently falls back to another historical run.
 - Repeat finalized session metadata (`started_at`, `ended_at`, `status`, and serialized `config_json`) on each CSV data row. This stays spreadsheet-friendly while making each exported file self-contained for the later CSV review slice.
 - Load finalized SQLite sessions through a dedicated read-only review payload containing session metadata and readings. Display at most 12,000 evenly sampled points while preserving first and last readings; retain the original sample count in the UI.
 - Keep live/controller state underneath review mode rather than overwriting it. Exiting review therefore returns to the prior live-ready state without restarting the backend or mutating meter settings.
@@ -67,9 +67,19 @@ The implementation is considered software-complete when the persisted settings, 
 - Require a successful dry-run read, explicit destructive confirmation, and an “isolated from the daisy chain” acknowledgement in the UI. The backend independently rejects concurrent monitoring/configuration operations and persists target 8N1 app settings only after reopening at the target ID/baud and verifying the complete block.
 - Keep target roles at device IDs 1 and 2 with 19200 baud as the dialog defaults. Automatic current-setting scans and password reset are deferred; operators must first enter the meter's current connection in Settings, matching the minimum safe Legacy_2 workflow.
 
+## Review-fix pass (2026-08-12)
+
+- Save normalized settings through a same-directory temporary file and replacement step. Missing settings still use lab defaults; present but invalid or unreadable settings surface an error and cannot silently become COM5/device 1.
+- Auto-finalize orphaned `running` or null-ended sessions only when the in-process monitor is idle. Preserve readings and stored errors, recount samples, and record `Process exited unexpectedly`.
+- Guard Test RS485 with the same exclusive serial-operation guard as meter configuration, so probes, restore operations, and monitor startup cannot overlap.
+- Keep report, CSV, and review actions limited to finalized sessions with readings. Failed connection attempts clear their ghost session id, and toolbar actions never fall back to `sessions[0]`.
+- Preserve config honesty in historical review: invalid database `config_json` keeps readings reviewable but is marked unavailable instead of displaying lab defaults as real run settings.
+- Write best-effort operational messages to `%LOCALAPPDATA%\com.accuenergy.metering\logs\app.log` and rotate one backup after 5 MB; log I/O failures do not fail monitoring.
+- Use a full-width first plot for the three-graph layout. No uPlot axis values were changed because rendered clipping could not be inspected from the unattended CLI.
+
 ## Verification boundary
 
 - `bun install`, frontend lint/tests/build, Rust formatting/tests, and a full Tauri dev launch succeeded on August 11, 2026.
 - Windows reported no attached serial ports during verification. No live Modbus, meter response, real sample stream, or hardware-generated report is claimed.
-- Abrupt process termination or power loss can leave the latest session marked `running`; committed WAL readings remain available. Normal UI close is intercepted and waits for the implemented stop/finalize path.
-- Persistent text-file logging, signed installer publication, and S-drive staging are intentionally deferred; they are not required for the 0.1.0 parity target.
+- Abrupt process termination or power loss can temporarily leave the latest session marked `running`; committed WAL readings remain available and the next idle desktop initialization finalizes the orphan. Normal UI close is intercepted and waits for the implemented stop/finalize path.
+- Signed installer publication and S-drive staging remain deferred; they are not required for the 0.1.0 parity target.
