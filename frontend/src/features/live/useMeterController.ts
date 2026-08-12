@@ -109,6 +109,7 @@ export function useMeterController() {
   const [meterConfigAction, setMeterConfigAction] = useState<"idle" | "preview" | "apply">("idle");
   const pendingReportRef = useRef(false);
   const runningRef = useRef(false);
+  const startingRef = useRef(false);
   const meterConfigActionRef = useRef<"idle" | "preview" | "apply">("idle");
   const allowCloseRef = useRef(false);
   const monitorEndWaiters = useRef(new Set<() => void>());
@@ -275,6 +276,17 @@ export function useMeterController() {
           setStatus("error");
           setLiveHz(0);
           resolveMonitorEnd();
+          if (payload.kind === "connection") {
+            void getMonitorState()
+              .then((monitorState) => {
+                if (!monitorState.running || monitorState.sessionId !== payload.sessionId) {
+                  setCurrentSessionId((current) => (current === payload.sessionId ? null : current));
+                }
+              })
+              .catch(() => {
+                setCurrentSessionId((current) => (current === payload.sessionId ? null : current));
+              });
+          }
           pushLog(`${payload.kind === "connection" ? "Connection" : "Monitoring"} error: ${payload.message}`);
           showNotice("error", payload.kind === "connection" ? "Meter not connected" : "Monitoring failed", payload.message);
           void refreshSessions();
@@ -299,6 +311,17 @@ export function useMeterController() {
       return;
     }
     if (runtime !== "desktop") return;
+    if (
+      startingRef.current ||
+      runningRef.current ||
+      status === "connecting" ||
+      status === "running" ||
+      status === "stopping"
+    ) {
+      showNotice("warning", "Monitoring is already active", "Stop the active session before starting another one.");
+      return;
+    }
+    startingRef.current = true;
     pendingReportRef.current = false;
     setStatus("connecting");
     setProbeStatus(null);
@@ -313,11 +336,25 @@ export function useMeterController() {
       setCurrentSessionId(result.sessionId);
       pushLog(`Starting monitor ${result.sessionId} · ${config.port} @ ${config.baudrate} baud.`);
     } catch (error) {
+      try {
+        const monitorState = await getMonitorState();
+        if (monitorState.running) {
+          setStatus("running");
+          setCurrentSessionId(monitorState.sessionId);
+          pushLog(`Start request reported an error, but the backend is monitoring ${monitorState.sessionId ?? "an active session"}: ${String(error)}`);
+          showNotice("warning", "Monitoring is already active", String(error));
+          return;
+        }
+      } catch (stateError) {
+        pushLog(`Could not confirm monitor state after the start error: ${String(stateError)}`);
+      }
       setStatus("error");
       pushLog(`Could not start monitor: ${String(error)}`);
       showNotice("error", "Could not start monitor", String(error));
+    } finally {
+      startingRef.current = false;
     }
-  }, [config.baudrate, config.port, pushLog, review, runtime, showNotice, startDemo]);
+  }, [config.baudrate, config.port, pushLog, review, runtime, showNotice, startDemo, status]);
 
   const stop = useCallback(async (): Promise<StopOutcome> => {
     if (runtime === "browser") {
@@ -609,9 +646,18 @@ export function useMeterController() {
       return;
     }
     const target =
-      review?.session ?? sessions.find((session) => session.sessionId === currentSessionId) ?? sessions[0];
+      review?.session ??
+      sessions.find(
+        (session) =>
+          session.sessionId === currentSessionId && session.endedAt !== null && session.status !== "running",
+      ) ??
+      null;
     if (!target) {
-      showNotice("warning", "No session available", "Complete a monitoring session before generating a report.");
+      showNotice(
+        "warning",
+        "No finalized session selected",
+        "Select a finished session before generating a report.",
+      );
       return;
     }
     await generateAndOpen(target.sessionId);
@@ -654,7 +700,8 @@ export function useMeterController() {
           session.endedAt !== null &&
           session.status !== "running" &&
           session.sampleCount > 0,
-      ) ?? sessions.find((session) => session.endedAt !== null && session.status !== "running" && session.sampleCount > 0);
+      ) ??
+      null;
     if (!target) {
       showNotice("warning", "No finished session", "Complete a monitoring session before exporting CSV.");
       return;

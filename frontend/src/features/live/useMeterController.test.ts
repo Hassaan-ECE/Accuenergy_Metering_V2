@@ -161,6 +161,10 @@ beforeEach(() => {
   mocks.getMonitorState.mockResolvedValue({ running: false, sessionId: null });
   mocks.recoverOrphanedSessions.mockResolvedValue([]);
   mocks.saveConfig.mockImplementation(async (config) => config);
+  mocks.startMonitor.mockResolvedValue({
+    sessionId: "run_requested",
+    databasePath: "C:\\data\\meter_log.db",
+  });
   mocks.stopMonitor.mockResolvedValue(null);
   mocks.generateReport.mockResolvedValue("C:\\data\\reports\\report.html");
   mocks.exportSessionCsv.mockResolvedValue("C:\\data\\exports\\readings.csv");
@@ -273,6 +277,121 @@ describe("orphaned session recovery", () => {
 
     expect(rendered.result.current.status).toBe("running");
     expect(mocks.recoverOrphanedSessions).not.toHaveBeenCalled();
+  });
+});
+
+describe("monitor start lifecycle", () => {
+  it("ignores an overlapping second start and keeps Stop available", async () => {
+    let resolveStart: ((value: { sessionId: string; databasePath: string }) => void) | undefined;
+    mocks.startMonitor.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveStart = resolve;
+        }),
+    );
+    const rendered = renderHook(() => useMeterController());
+    await waitFor(() => expect(rendered.result.current.runtime).toBe("desktop"));
+
+    let firstStart: Promise<void> | undefined;
+    let secondStart: Promise<void> | undefined;
+    act(() => {
+      firstStart = rendered.result.current.start();
+      secondStart = rendered.result.current.start();
+    });
+
+    expect(mocks.startMonitor).toHaveBeenCalledTimes(1);
+    expect(rendered.result.current.notice).toMatchObject({
+      tone: "warning",
+      title: "Monitoring is already active",
+    });
+    act(() => resolveStart?.({ sessionId: "run_overlap", databasePath: "C:\\data\\meter_log.db" }));
+    await act(async () => Promise.all([firstStart, secondStart]));
+
+    expect(rendered.result.current.status).toBe("connecting");
+    expect(rendered.result.current.isRunning).toBe(true);
+    expect(rendered.result.current.currentSessionId).toBe("run_overlap");
+  });
+
+  it("reattaches when a rejected start finds the backend already running", async () => {
+    mocks.startMonitor.mockRejectedValueOnce(new Error("A monitor session is already running."));
+    mocks.getMonitorState
+      .mockResolvedValueOnce({ running: false, sessionId: null })
+      .mockResolvedValueOnce({ running: true, sessionId: "run_backend" });
+    const rendered = renderHook(() => useMeterController());
+    await waitFor(() => expect(rendered.result.current.runtime).toBe("desktop"));
+
+    await act(async () => rendered.result.current.start());
+
+    expect(rendered.result.current.status).toBe("running");
+    expect(rendered.result.current.isRunning).toBe(true);
+    expect(rendered.result.current.currentSessionId).toBe("run_backend");
+    expect(rendered.result.current.notice).toMatchObject({
+      tone: "warning",
+      title: "Monitoring is already active",
+    });
+  });
+
+  it("enters error state when a rejected start has no active backend monitor", async () => {
+    mocks.startMonitor.mockRejectedValueOnce(new Error("Could not open COM3"));
+    const rendered = renderHook(() => useMeterController());
+    await waitFor(() => expect(rendered.result.current.runtime).toBe("desktop"));
+
+    await act(async () => rendered.result.current.start());
+
+    expect(rendered.result.current.status).toBe("error");
+    expect(rendered.result.current.isRunning).toBe(false);
+    expect(rendered.result.current.notice).toMatchObject({
+      tone: "error",
+      title: "Could not start monitor",
+    });
+  });
+
+  it("clears a connection-failed ghost session id", async () => {
+    mocks.startMonitor.mockResolvedValueOnce({
+      sessionId: "run_ghost",
+      databasePath: "C:\\data\\meter_log.db",
+    });
+    const rendered = renderHook(() => useMeterController());
+    await waitFor(() => expect(rendered.result.current.runtime).toBe("desktop"));
+    await waitFor(() => expect(mocks.listeners.has("monitor-failed")).toBe(true));
+    await act(async () => rendered.result.current.start());
+    expect(rendered.result.current.currentSessionId).toBe("run_ghost");
+
+    act(() =>
+      mocks.listeners.get("monitor-failed")?.({
+        payload: { kind: "connection", sessionId: "run_ghost", message: "Could not open COM3" },
+      }),
+    );
+
+    await waitFor(() => expect(rendered.result.current.currentSessionId).toBeNull());
+    expect(rendered.result.current.status).toBe("error");
+  });
+
+  it("does not fall back to an older report when the selected id is not finalized", async () => {
+    const olderFinalized = session({
+      sessionId: "run_older",
+      endedAt: "2026-08-12T01:01:00-04:00",
+      status: "completed",
+      stopReason: "Run duration reached",
+      sampleCount: 10,
+    });
+    mocks.listSessions.mockResolvedValue([olderFinalized]);
+    mocks.startMonitor.mockResolvedValueOnce({
+      sessionId: "run_missing",
+      databasePath: "C:\\data\\meter_log.db",
+    });
+    const rendered = renderHook(() => useMeterController());
+    await waitFor(() => expect(rendered.result.current.currentSessionId).toBe("run_older"));
+    await act(async () => rendered.result.current.start());
+    await act(async () => rendered.result.current.stop());
+
+    await act(async () => rendered.result.current.openReport());
+
+    expect(mocks.generateReport).not.toHaveBeenCalled();
+    expect(rendered.result.current.notice).toMatchObject({
+      tone: "warning",
+      title: "No finalized session selected",
+    });
   });
 });
 
