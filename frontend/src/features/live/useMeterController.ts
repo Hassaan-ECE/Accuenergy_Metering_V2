@@ -178,15 +178,14 @@ export function useMeterController() {
       }
       setRuntime("desktop");
       try {
-        const [loadedConfig, loadedPaths, loadedPorts, loadedSessions, monitorState] = await Promise.all([
-          getConfig(),
-          getAppPaths(),
-          listSerialPorts(),
-          listSessions(),
-          getMonitorState(),
+        const [configResult, [loadedPaths, loadedPorts, loadedSessions, monitorState]] = await Promise.all([
+          getConfig()
+            .then((value) => ({ value, error: null }))
+            .catch((error: unknown) => ({ value: null, error })),
+          Promise.all([getAppPaths(), listSerialPorts(), listSessions(), getMonitorState()]),
         ]);
         if (cancelled) return;
-        setConfig(loadedConfig);
+        if (configResult.value) setConfig(configResult.value);
         setPaths(loadedPaths);
         setPorts(loadedPorts);
         setSessions(loadedSessions);
@@ -202,7 +201,16 @@ export function useMeterController() {
           setCurrentSessionId(monitorState.sessionId);
           pushLog(`Reattached to active session ${monitorState.sessionId ?? ""}.`);
         } else {
-          pushLog("Desktop backend connected; persisted settings and sessions loaded.");
+          pushLog(
+            configResult.error
+              ? "Desktop backend connected, but saved settings could not be loaded."
+              : "Desktop backend connected; persisted settings and sessions loaded.",
+          );
+        }
+        if (configResult.error) {
+          const message = `${String(configResult.error)} The saved settings were not replaced with defaults. Open Settings to correct or overwrite the file.`;
+          pushLog(`Saved settings require attention: ${String(configResult.error)}`);
+          showNotice("error", "Saved settings could not be loaded", message);
         }
       } catch (error) {
         pushLog(`Desktop initialization failed: ${String(error)}`);

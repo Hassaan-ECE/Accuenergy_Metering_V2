@@ -1,4 +1,4 @@
-use std::{fs, path::Path};
+use std::{fs, io::ErrorKind, path::Path};
 
 use serde::{Deserialize, Serialize};
 
@@ -106,8 +106,30 @@ impl AppConfig {
         }
         let payload = serde_json::to_string_pretty(&normalized)
             .map_err(|error| format!("Could not serialize settings: {error}"))?;
-        fs::write(path, payload)
-            .map_err(|error| format!("Could not write settings file: {error}"))?;
+        let file_name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .ok_or_else(|| "Settings path must end with a valid file name.".to_string())?;
+        let temp_path = path.with_file_name(format!("{file_name}.tmp"));
+        fs::write(&temp_path, payload)
+            .map_err(|error| format!("Could not write temporary settings file: {error}"))?;
+
+        match fs::remove_file(path) {
+            Ok(()) => {}
+            Err(error) if error.kind() == ErrorKind::NotFound => {}
+            Err(error) => {
+                return Err(format!(
+                    "Could not replace the existing settings file: {error}. Settings were not saved; the temporary file may remain at {}.",
+                    temp_path.display()
+                ));
+            }
+        }
+        fs::rename(&temp_path, path).map_err(|error| {
+            format!(
+                "Could not install the new settings file: {error}. Settings were not saved; the temporary file may remain at {}.",
+                temp_path.display()
+            )
+        })?;
         Ok(normalized)
     }
 }
@@ -115,6 +137,17 @@ impl AppConfig {
 #[cfg(test)]
 mod tests {
     use super::AppConfig;
+    use std::fs;
+
+    fn temp_settings_path(name: &str) -> std::path::PathBuf {
+        let directory = std::env::temp_dir().join(format!(
+            "accuenergy-config-tests-{}-{name}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&directory);
+        fs::create_dir_all(&directory).unwrap();
+        directory.join("settings.json")
+    }
 
     #[test]
     fn accepts_lab_defaults() {
@@ -151,5 +184,85 @@ mod tests {
         assert_eq!(config.theme_name, "dark");
         assert_eq!(config.port, "COM7");
         assert_eq!(config.parity, "E");
+    }
+
+    #[test]
+    fn missing_settings_load_defaults() {
+        let path = temp_settings_path("missing");
+
+        let loaded = AppConfig::load(&path).unwrap();
+
+        assert_eq!(loaded.port, AppConfig::default().port);
+        assert_eq!(loaded.device_id, AppConfig::default().device_id);
+    }
+
+    #[test]
+    fn valid_settings_are_loaded_and_normalized() {
+        let path = temp_settings_path("valid");
+        fs::write(
+            &path,
+            serde_json::to_string(&AppConfig {
+                theme_name: " Dark ".into(),
+                port: " COM9 ".into(),
+                parity: "e".into(),
+                ..AppConfig::default()
+            })
+            .unwrap(),
+        )
+        .unwrap();
+
+        let loaded = AppConfig::load(&path).unwrap();
+
+        assert_eq!(loaded.theme_name, "dark");
+        assert_eq!(loaded.port, "COM9");
+        assert_eq!(loaded.parity, "E");
+    }
+
+    #[test]
+    fn invalid_json_is_reported() {
+        let path = temp_settings_path("invalid-json");
+        fs::write(&path, "{not-json").unwrap();
+
+        let error = AppConfig::load(&path).unwrap_err();
+
+        assert!(error.contains("Settings file is invalid JSON"));
+    }
+
+    #[test]
+    fn invalid_loaded_config_is_reported() {
+        let path = temp_settings_path("invalid-device");
+        fs::write(
+            &path,
+            serde_json::to_string(&AppConfig {
+                device_id: 0,
+                ..AppConfig::default()
+            })
+            .unwrap(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            AppConfig::load(&path).unwrap_err(),
+            "Device ID must be between 1 and 247."
+        );
+    }
+
+    #[test]
+    fn save_round_trips_and_removes_temporary_file() {
+        let path = temp_settings_path("round-trip");
+        let config = AppConfig {
+            theme_name: " Dark ".into(),
+            port: " COM8 ".into(),
+            parity: "o".into(),
+            ..AppConfig::default()
+        };
+
+        let saved = config.save(&path).unwrap();
+        let loaded = AppConfig::load(&path).unwrap();
+
+        assert_eq!(saved.theme_name, "dark");
+        assert_eq!(loaded.port, "COM8");
+        assert_eq!(loaded.parity, "O");
+        assert!(!path.with_file_name("settings.json.tmp").exists());
     }
 }

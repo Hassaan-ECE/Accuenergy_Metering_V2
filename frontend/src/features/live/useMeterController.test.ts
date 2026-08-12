@@ -157,6 +157,7 @@ beforeEach(() => {
   mocks.listSerialPorts.mockResolvedValue([]);
   mocks.listSessions.mockResolvedValue([]);
   mocks.getMonitorState.mockResolvedValue({ running: false, sessionId: null });
+  mocks.saveConfig.mockImplementation(async (config) => config);
   mocks.stopMonitor.mockResolvedValue(null);
   mocks.generateReport.mockResolvedValue("C:\\data\\reports\\report.html");
   mocks.exportSessionCsv.mockResolvedValue("C:\\data\\exports\\readings.csv");
@@ -215,6 +216,29 @@ beforeEach(() => {
 });
 
 afterEach(() => cleanup());
+
+describe("desktop settings initialization", () => {
+  it("surfaces invalid saved settings without silently replacing them", async () => {
+    mocks.getConfig.mockRejectedValueOnce(new Error("Settings file is invalid JSON: expected value"));
+    const rendered = renderHook(() => useMeterController());
+
+    await waitFor(() => expect(rendered.result.current.runtime).toBe("desktop"));
+    await waitFor(() =>
+      expect(rendered.result.current.notice).toMatchObject({
+        tone: "error",
+        title: "Saved settings could not be loaded",
+      }),
+    );
+
+    expect(rendered.result.current.config).toEqual(DEFAULT_CONFIG);
+    expect(rendered.result.current.notice?.message).toContain("not replaced with defaults");
+    expect(rendered.result.current.notice?.message).toContain("Open Settings");
+    expect(mocks.saveConfig).not.toHaveBeenCalled();
+
+    await act(async () => rendered.result.current.persistConfig({ ...DEFAULT_CONFIG, port: "COM6" }));
+    expect(mocks.saveConfig).toHaveBeenCalledWith({ ...DEFAULT_CONFIG, port: "COM6" });
+  });
+});
 
 describe("pending report lifecycle", () => {
   it("generates the requested report immediately when a null stop reveals a finalized session", async () => {

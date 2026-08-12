@@ -22,10 +22,7 @@ pub fn ping() -> &'static str {
 #[tauri::command]
 pub fn get_config(app: AppHandle) -> Result<AppConfig, String> {
     let paths = AppPaths::resolve(&app)?;
-    match AppConfig::load(&paths.settings) {
-        Ok(config) => Ok(config),
-        Err(_) => Ok(AppConfig::default()),
-    }
+    AppConfig::load(&paths.settings)?.normalized()
 }
 
 #[tauri::command]
@@ -56,9 +53,7 @@ pub fn get_app_paths(app: AppHandle) -> Result<AppPaths, String> {
 #[tauri::command]
 pub async fn test_rs485(app: AppHandle) -> Result<MeterSnapshot, String> {
     let paths = AppPaths::resolve(&app)?;
-    let config = AppConfig::load(&paths.settings)
-        .unwrap_or_default()
-        .normalized()?;
+    let config = AppConfig::load(&paths.settings)?.normalized()?;
     tauri::async_runtime::spawn_blocking(move || crate::meter_io::probe(&config))
         .await
         .map_err(|error| format!("RS485 test task failed: {error}"))
@@ -105,9 +100,7 @@ pub fn start_monitor(
     manager: State<'_, MonitorManager>,
 ) -> Result<StartMonitorResult, String> {
     let paths = AppPaths::resolve(&app)?;
-    let config = AppConfig::load(&paths.settings)
-        .unwrap_or_default()
-        .normalized()?;
+    let config = AppConfig::load(&paths.settings)?.normalized()?;
     manager.start(app, paths, config)
 }
 
