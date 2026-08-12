@@ -51,6 +51,12 @@ The implementation is considered software-complete when the persisted settings, 
 - Persist light/dark theme with the same config model and mirror it to local storage to prevent startup flash.
 - Replace the borrowed Inventory icon with a product-specific Accuenergy waveform mark and keep its generator beside the asset.
 
+## Feature pass — UI and session recall
+
+- Tile Frequency, Voltage, Current, and combined Power/PF uPlot groups inside one fixed graph region. All visible plots share the same aligned time buffer and update with `setData`; no chart-library replacement or per-sample React remount is used.
+- Keep at least one graph group selected. Persist visible graph groups and the Log & sessions panel preference in local storage because these are workstation UI preferences rather than meter/session configuration.
+- Size each uPlot from its actual tile and reserve explicit bottom-axis space and padding so timestamp labels remain visible in one- and multi-graph layouts.
+
 ## Verification boundary
 
 - `bun install`, frontend lint/tests/build, Rust formatting/tests, and a full Tauri dev launch succeeded on August 11, 2026.

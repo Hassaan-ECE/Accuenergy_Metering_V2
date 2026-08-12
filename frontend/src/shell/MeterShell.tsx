@@ -4,6 +4,8 @@ import {
   Download,
   FileChartColumnIncreasing,
   FolderOpen,
+  PanelRightClose,
+  PanelRightOpen,
   Play,
   RefreshCw,
   Settings2,
@@ -26,11 +28,20 @@ import { cn } from "@/shared/lib/utils";
 import { ShellHeader } from "./ShellHeader";
 import { ShellStatusStrip } from "./ShellStatusStrip";
 
-type GraphMode = "frequency" | "voltage" | "current" | "power" | "powerFactor";
+type GraphMode = "frequency" | "voltage" | "current" | "power";
+
+const ACTIVITY_PANEL_STORAGE_KEY = "accuenergyMetering.showActivityPanel";
+const GRAPH_SELECTION_STORAGE_KEY = "accuenergyMetering.visibleGraphs";
 
 const GRAPH_PRESETS: Record<
   GraphMode,
-  { label: string; title: string; unit: string; keys: Array<{ key: MeterKey; label: string; color: string }> }
+  {
+    label: string;
+    title: string;
+    unit: string;
+    secondaryUnit?: string;
+    keys: Array<{ key: MeterKey; label: string; color: string; scale?: "y" | "y2" }>;
+  }
 > = {
   frequency: {
     label: "Frequency",
@@ -60,23 +71,45 @@ const GRAPH_PRESETS: Record<
     ],
   },
   power: {
-    label: "Power",
-    title: "Active power vs time",
+    label: "Power / PF",
+    title: "Active power and power factor",
     unit: "W",
-    keys: [{ key: "active_power_p1", label: "P1", color: "#dc2626" }],
-  },
-  powerFactor: {
-    label: "Power factor",
-    title: "Power factor vs time",
-    unit: "PF",
-    keys: [{ key: "power_factor_pf1", label: "PF1", color: "#7c3aed" }],
+    secondaryUnit: "PF",
+    keys: [
+      { key: "active_power_p1", label: "P1", color: "#dc2626", scale: "y" },
+      { key: "power_factor_pf1", label: "PF1", color: "#7c3aed", scale: "y2" },
+    ],
   },
 };
+
+const GRAPH_MODES = Object.keys(GRAPH_PRESETS) as GraphMode[];
+
+function readActivityPanelPreference(): boolean {
+  try {
+    return window.localStorage.getItem(ACTIVITY_PANEL_STORAGE_KEY) !== "hidden";
+  } catch {
+    return true;
+  }
+}
+
+function readGraphSelection(): GraphMode[] {
+  try {
+    const stored = window.localStorage.getItem(GRAPH_SELECTION_STORAGE_KEY);
+    if (!stored) return GRAPH_MODES;
+    const parsed = JSON.parse(stored) as unknown;
+    if (!Array.isArray(parsed)) return GRAPH_MODES;
+    const selected = GRAPH_MODES.filter((mode) => parsed.includes(mode));
+    return selected.length ? selected : GRAPH_MODES;
+  } catch {
+    return GRAPH_MODES;
+  }
+}
 
 export function MeterShell() {
   const controller = useMeterController();
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [graphMode, setGraphMode] = useState<GraphMode>("frequency");
+  const [visibleGraphs, setVisibleGraphs] = useState<GraphMode[]>(readGraphSelection);
+  const [showActivityPanel, setShowActivityPanel] = useState(readActivityPanelPreference);
   const [sideTab, setSideTab] = useState<"activity" | "sessions">("activity");
   const theme = controller.config.themeName;
 
@@ -90,19 +123,30 @@ export function MeterShell() {
   }, []);
 
   useEffect(() => {
+    window.localStorage.setItem(ACTIVITY_PANEL_STORAGE_KEY, showActivityPanel ? "shown" : "hidden");
+  }, [showActivityPanel]);
+
+  useEffect(() => {
+    window.localStorage.setItem(GRAPH_SELECTION_STORAGE_KEY, JSON.stringify(visibleGraphs));
+  }, [visibleGraphs]);
+
+  useEffect(() => {
     if (!controller.notice) return;
     const timer = window.setTimeout(controller.dismissNotice, 6500);
     return () => window.clearTimeout(timer);
   }, [controller.dismissNotice, controller.notice]);
 
-  const selectedGraph = GRAPH_PRESETS[graphMode];
-  const graphLines = useMemo<GraphLine[]>(
+  const graphCards = useMemo(
     () =>
-      selectedGraph.keys.map((line) => ({
-        ...line,
-        values: controller.graph.series[line.key],
-      })),
-    [controller.graph.series, selectedGraph.keys],
+      visibleGraphs.map((mode) => {
+        const preset = GRAPH_PRESETS[mode];
+        const lines: GraphLine[] = preset.keys.map((line) => ({
+          ...line,
+          values: controller.graph.series[line.key],
+        }));
+        return { mode, preset, lines };
+      }),
+    [controller.graph.series, visibleGraphs],
   );
   const summary = useMemo(() => configSummary(controller.config), [controller.config]);
 
@@ -114,6 +158,16 @@ export function MeterShell() {
   const onSaveSettings = async (config: AppConfig) => {
     await controller.persistConfig(config);
     setSettingsOpen(false);
+  };
+
+  const toggleGraph = (mode: GraphMode) => {
+    setVisibleGraphs((current) => {
+      if (current.includes(mode)) {
+        return current.length === 1 ? current : current.filter((candidate) => candidate !== mode);
+      }
+      const selected = new Set([...current, mode]);
+      return GRAPH_MODES.filter((candidate) => selected.has(candidate));
+    });
   };
 
   const statusText = controller.testing
@@ -167,6 +221,35 @@ export function MeterShell() {
           <Button disabled={controller.reporting || controller.runtime !== "desktop"} onClick={controller.openReport} variant="outline">
             <FileChartColumnIncreasing className="size-4" />
             {controller.reporting ? "Generating…" : "Generate Report"}
+          </Button>
+          <div className="mx-1 hidden h-6 w-px bg-border lg:block" />
+          <div className="flex items-center gap-1 rounded-lg bg-muted/70 p-1" aria-label="Visible graph groups">
+            <span className="px-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Graphs</span>
+            {GRAPH_MODES.map((mode) => (
+              <button
+                aria-pressed={visibleGraphs.includes(mode)}
+                className={cn(
+                  "rounded-md px-2 py-1 text-[11px] font-medium transition",
+                  visibleGraphs.includes(mode)
+                    ? "bg-card text-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+                key={mode}
+                onClick={() => toggleGraph(mode)}
+                type="button"
+              >
+                {GRAPH_PRESETS[mode].label}
+              </button>
+            ))}
+          </div>
+          <Button
+            aria-pressed={showActivityPanel}
+            onClick={() => setShowActivityPanel((current) => !current)}
+            size="sm"
+            variant={showActivityPanel ? "secondary" : "ghost"}
+          >
+            {showActivityPanel ? <PanelRightClose className="size-4" /> : <PanelRightOpen className="size-4" />}
+            Log & sessions
           </Button>
           <div className="mx-1 hidden h-6 w-px bg-border xl:block" />
           <Button
@@ -225,40 +308,46 @@ export function MeterShell() {
           <MetricCard label="Status" status={statusTone} text={statusText} />
         </section>
 
-        <section className="grid min-h-0 flex-1 gap-3 md:grid-cols-[minmax(0,1.55fr)_minmax(330px,0.85fr)]">
+        <section
+          className={cn(
+            "grid min-h-0 flex-1 gap-3 overflow-hidden",
+            showActivityPanel && "md:grid-cols-[minmax(0,1.55fr)_minmax(330px,0.85fr)]",
+          )}
+        >
           <Card className="flex min-h-0 flex-col overflow-hidden">
             <CardHeader className="shrink-0 gap-2 pb-0">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <CardTitle>Live graph · {selectedGraph.title}</CardTitle>
-                <div className="flex flex-wrap gap-1 rounded-lg bg-muted/70 p-1">
-                  {(Object.keys(GRAPH_PRESETS) as GraphMode[]).map((mode) => (
-                    <button
-                      className={cn(
-                        "rounded-md px-2 py-1 text-[11px] font-medium transition",
-                        graphMode === mode ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
-                      )}
-                      key={mode}
-                      onClick={() => setGraphMode(mode)}
-                      type="button"
-                    >
-                      {GRAPH_PRESETS[mode].label}
-                    </button>
-                  ))}
-                </div>
+              <div className="flex items-center justify-between gap-2">
+                <CardTitle>Live graphs</CardTitle>
+                <span className="text-[11px] text-muted-foreground">
+                  {graphCards.length} group{graphCards.length === 1 ? "" : "s"} · aligned time window
+                </span>
               </div>
             </CardHeader>
-            <CardContent className="min-h-0 flex-1 overflow-hidden pt-2">
-              <LiveGraph
-                lines={graphLines}
-                theme={theme}
-                times={controller.graph.times}
-                title={selectedGraph.label}
-                unit={selectedGraph.unit}
-              />
+            <CardContent className="min-h-0 flex-1 overflow-hidden pb-3 pt-2">
+              <div
+                className={cn(
+                  "grid h-full min-h-0 gap-2 overflow-hidden",
+                  graphCards.length === 1 ? "grid-cols-1" : "grid-cols-2",
+                )}
+                style={{ gridTemplateRows: `repeat(${Math.ceil(graphCards.length / 2)}, minmax(0, 1fr))` }}
+              >
+                {graphCards.map(({ lines, mode, preset }) => (
+                  <div className="min-h-0 overflow-hidden rounded-lg border border-border bg-muted/15 p-1.5" key={mode}>
+                    <LiveGraph
+                      lines={lines}
+                      secondaryUnit={preset.secondaryUnit}
+                      theme={theme}
+                      times={controller.graph.times}
+                      title={preset.title}
+                      unit={preset.unit}
+                    />
+                  </div>
+                ))}
+              </div>
             </CardContent>
           </Card>
 
-          <Card className="flex min-h-0 flex-col overflow-hidden">
+          {showActivityPanel ? <Card className="flex min-h-0 flex-col overflow-hidden">
             <CardHeader className="shrink-0 gap-3 pb-0">
               <SessionInfo
                 databasePath={controller.paths?.database ?? null}
@@ -295,7 +384,7 @@ export function MeterShell() {
                 />
               )}
             </CardContent>
-          </Card>
+          </Card> : null}
         </section>
       </main>
 
