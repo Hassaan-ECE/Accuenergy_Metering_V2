@@ -118,6 +118,7 @@ beforeEach(() => {
   mocks.getMonitorState.mockResolvedValue({ running: false, sessionId: null });
   mocks.stopMonitor.mockResolvedValue(null);
   mocks.generateReport.mockResolvedValue("C:\\data\\reports\\report.html");
+  mocks.exportSessionCsv.mockResolvedValue("C:\\data\\exports\\readings.csv");
   mocks.openPath.mockResolvedValue(undefined);
   mocks.onCloseRequested.mockResolvedValue(() => undefined);
   mocks.confirm.mockResolvedValue(false);
@@ -189,5 +190,28 @@ describe("pending report lifecycle", () => {
     emitFinished(finishedSummary());
     expect(mocks.generateReport).not.toHaveBeenCalled();
     expect(mocks.openPath).not.toHaveBeenCalled();
+  });
+});
+
+describe("CSV export", () => {
+  it("exports and opens the selected finished session", async () => {
+    const finalizedSession = session({
+      endedAt: "2026-08-12T01:01:00-04:00",
+      status: "completed",
+      stopReason: "Run duration reached",
+      sampleCount: 10,
+    });
+    mocks.listSessions.mockResolvedValue([finalizedSession]);
+    const rendered = renderHook(() => useMeterController());
+    await waitFor(() => expect(rendered.result.current.currentSessionId).toBe("run_requested"));
+
+    await act(async () => rendered.result.current.exportCurrentCsv());
+
+    expect(mocks.exportSessionCsv).toHaveBeenCalledWith("run_requested");
+    expect(mocks.openPath).toHaveBeenCalledWith("C:\\data\\exports\\readings.csv");
+    expect(rendered.result.current.notice).toMatchObject({
+      tone: "success",
+      title: "CSV exported",
+    });
   });
 });

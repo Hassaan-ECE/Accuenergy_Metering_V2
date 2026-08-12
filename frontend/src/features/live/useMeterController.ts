@@ -475,7 +475,7 @@ export function useMeterController() {
         const path = await exportSessionCsv(sessionId);
         pushLog(`CSV exported: ${path}`);
         await openPath(path);
-        showNotice("success", "CSV exported", "The session export opened in your default CSV application.");
+        showNotice("success", "CSV exported", `Saved to ${path} and opened in your default CSV application.`);
       } catch (error) {
         pushLog(`CSV export failed: ${String(error)}`);
         showNotice("error", "CSV export failed", String(error));
@@ -485,6 +485,22 @@ export function useMeterController() {
     },
     [pushLog, runtime, showNotice],
   );
+
+  const exportCurrentCsv = useCallback(async () => {
+    const target =
+      sessions.find(
+        (session) =>
+          session.sessionId === currentSessionId &&
+          session.endedAt !== null &&
+          session.status !== "running" &&
+          session.sampleCount > 0,
+      ) ?? sessions.find((session) => session.endedAt !== null && session.status !== "running" && session.sampleCount > 0);
+    if (!target) {
+      showNotice("warning", "No finished session", "Complete a monitoring session before exporting CSV.");
+      return;
+    }
+    await exportCsv(target.sessionId);
+  }, [currentSessionId, exportCsv, sessions, showNotice]);
 
   const openDataPath = useCallback(
     async (path: string | null | undefined) => {
@@ -550,6 +566,7 @@ export function useMeterController() {
     openReport,
     openSessionReport,
     exportCsv,
+    exportCurrentCsv,
     openDataPath,
     dismissNotice,
   };

@@ -153,7 +153,7 @@ pub fn generate(paths: &AppPaths, session_id: &str) -> Result<PathBuf, String> {
 }
 
 pub fn export_csv(paths: &AppPaths, session_id: &str) -> Result<PathBuf, String> {
-    storage::require_finalized_session(&paths.database, session_id, "exporting CSV")?;
+    let session = storage::require_finalized_session(&paths.database, session_id, "exporting CSV")?;
     let readings = storage::load_readings(&paths.database, session_id)?;
     if readings.is_empty() {
         return Err("This session has no readings to export.".into());
@@ -165,9 +165,15 @@ pub fn export_csv(paths: &AppPaths, session_id: &str) -> Result<PathBuf, String>
         .join(format!("accuenergy_readings_{session_id}.csv"));
     let mut writer = csv::Writer::from_path(&output)
         .map_err(|error| format!("Could not create CSV export: {error}"))?;
+    let config_json = serde_json::to_string(&session.config)
+        .map_err(|error| format!("Could not serialize session settings for CSV: {error}"))?;
     writer
         .write_record([
             "session_id",
+            "session_started_at",
+            "session_ended_at",
+            "session_status",
+            "config_json",
             "ts_unix",
             "ts_iso",
             "frequency_hz",
@@ -186,6 +192,10 @@ pub fn export_csv(paths: &AppPaths, session_id: &str) -> Result<PathBuf, String>
         writer
             .write_record([
                 row.session_id,
+                session.started_at.clone(),
+                session.ended_at.clone().unwrap_or_default(),
+                session.status.clone(),
+                config_json.clone(),
                 format_float(row.ts_unix),
                 row.ts_iso,
                 optional_csv(row.values.frequency_hz),
@@ -532,6 +542,9 @@ mod tests {
         let csv_text = fs::read_to_string(csv).unwrap();
         assert!(csv_text.contains("frequency_hz"));
         assert!(csv_text.contains("60.1"));
+        assert!(csv_text.contains("session_started_at"));
+        assert!(csv_text.contains("config_json"));
+        assert!(csv_text.contains("\"\"deviceId\"\":1"));
     }
 
     #[test]

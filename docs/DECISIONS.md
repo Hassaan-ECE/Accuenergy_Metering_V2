@@ -56,6 +56,8 @@ The implementation is considered software-complete when the persisted settings, 
 - Tile Frequency, Voltage, Current, and combined Power/PF uPlot groups inside one fixed graph region. All visible plots share the same aligned time buffer and update with `setData`; no chart-library replacement or per-sample React remount is used.
 - Keep at least one graph group selected. Persist visible graph groups and the Log & sessions panel preference in local storage because these are workstation UI preferences rather than meter/session configuration.
 - Size each uPlot from its actual tile and reserve explicit bottom-axis space and padding so timestamp labels remain visible in one- and multi-graph layouts.
+- Put a one-click Export CSV action beside Report. It selects the current finalized session when possible, otherwise the latest finalized session with readings.
+- Repeat finalized session metadata (`started_at`, `ended_at`, `status`, and serialized `config_json`) on each CSV data row. This stays spreadsheet-friendly while making each exported file self-contained for the later CSV review slice.
 
 ## Verification boundary
 

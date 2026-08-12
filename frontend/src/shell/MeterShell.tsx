@@ -222,6 +222,14 @@ export function MeterShell() {
             <FileChartColumnIncreasing className="size-4" />
             {controller.reporting ? "Generating…" : "Generate Report"}
           </Button>
+          <Button
+            disabled={controller.exportingSessionId !== null || controller.runtime !== "desktop"}
+            onClick={controller.exportCurrentCsv}
+            variant="outline"
+          >
+            <Download className="size-4" />
+            {controller.exportingSessionId ? "Exporting…" : "Export CSV"}
+          </Button>
           <div className="mx-1 hidden h-6 w-px bg-border lg:block" />
           <div className="flex items-center gap-1 rounded-lg bg-muted/70 p-1" aria-label="Visible graph groups">
             <span className="px-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Graphs</span>
