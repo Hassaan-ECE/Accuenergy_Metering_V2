@@ -114,28 +114,7 @@ impl MonitorManager {
         let started_at = Local::now();
         let session_id = session_id(started_at);
         let stop = Arc::new(AtomicBool::new(false));
-        {
-            let mut activity = self
-                .activity
-                .lock()
-                .map_err(|_| "Monitor state is unavailable.")?;
-            if activity.meter_configuration {
-                return Err(
-                    "Meter communication configuration is in progress. Wait for it to finish before starting monitoring."
-                        .into(),
-                );
-            }
-            if let Some(current) = activity.monitor.as_ref() {
-                return Err(format!(
-                    "A monitor session is already running: {}",
-                    current.session_id
-                ));
-            }
-            activity.monitor = Some(ActiveMonitor {
-                session_id: session_id.clone(),
-                stop: stop.clone(),
-            });
-        }
+        self.reserve_monitor(session_id.clone(), stop.clone())?;
 
         let manager = self.clone();
         let thread_session_id = session_id.clone();
@@ -219,20 +198,38 @@ impl MonitorManager {
             .map_err(|_| "Monitor state is unavailable.")?;
         if let Some(active) = activity.monitor.as_ref() {
             return Err(format!(
-                "Stop the active monitoring session {} before configuring meter communication settings.",
+                "Stop the active monitoring session {} before using the serial port.",
                 active.session_id
             ));
         }
         if activity.meter_configuration {
-            return Err(
-                "Another meter communication configuration operation is already in progress."
-                    .into(),
-            );
+            return Err("Another serial operation is already in progress.".into());
         }
         activity.meter_configuration = true;
         Ok(MeterConfigurationGuard {
             manager: self.clone(),
         })
+    }
+
+    fn reserve_monitor(&self, session_id: String, stop: Arc<AtomicBool>) -> Result<(), String> {
+        let mut activity = self
+            .activity
+            .lock()
+            .map_err(|_| "Monitor state is unavailable.")?;
+        if activity.meter_configuration {
+            return Err(
+                "Another serial operation is already in progress. Wait for it to finish before starting monitoring."
+                    .into(),
+            );
+        }
+        if let Some(current) = activity.monitor.as_ref() {
+            return Err(format!(
+                "A monitor session is already running: {}",
+                current.session_id
+            ));
+        }
+        activity.monitor = Some(ActiveMonitor { session_id, stop });
+        Ok(())
     }
 
     fn clear(&self, session_id: &str) {
@@ -489,6 +486,8 @@ fn runtime_failure(session_id: Option<&str>, message: String) -> MonitorFailure 
 
 #[cfg(test)]
 mod tests {
+    use std::sync::{atomic::AtomicBool, Arc};
+
     use super::{session_id, should_log_consecutive_error, status_message, MonitorManager};
     use crate::domain::meter::MeterValues;
     use chrono::Local;
@@ -529,5 +528,42 @@ mod tests {
         drop(guard);
 
         assert!(manager.begin_meter_configuration().is_ok());
+    }
+
+    #[test]
+    fn serial_guard_blocks_monitor_reservation_and_releases() {
+        let manager = MonitorManager::default();
+        let guard = manager.begin_meter_configuration().unwrap();
+
+        let error = manager
+            .reserve_monitor("run_blocked".into(), Arc::new(AtomicBool::new(false)))
+            .unwrap_err();
+        assert!(error.contains("serial operation is already in progress"));
+
+        drop(guard);
+
+        assert!(manager
+            .reserve_monitor("run_allowed".into(), Arc::new(AtomicBool::new(false)),)
+            .is_ok());
+        manager.clear("run_allowed");
+    }
+
+    #[test]
+    fn active_monitor_blocks_serial_guard_with_actionable_message() {
+        let manager = MonitorManager::default();
+        manager
+            .reserve_monitor("run_active".into(), Arc::new(AtomicBool::new(false)))
+            .unwrap();
+
+        let error = match manager.begin_meter_configuration() {
+            Ok(_) => panic!("an active monitor must block serial operations"),
+            Err(error) => error,
+        };
+
+        assert_eq!(
+            error,
+            "Stop the active monitoring session run_active before using the serial port."
+        );
+        manager.clear("run_active");
     }
 }

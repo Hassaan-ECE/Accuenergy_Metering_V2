@@ -51,12 +51,19 @@ pub fn get_app_paths(app: AppHandle) -> Result<AppPaths, String> {
 }
 
 #[tauri::command]
-pub async fn test_rs485(app: AppHandle) -> Result<MeterSnapshot, String> {
+pub async fn test_rs485(
+    app: AppHandle,
+    manager: State<'_, MonitorManager>,
+) -> Result<MeterSnapshot, String> {
+    let serial_guard = manager.begin_meter_configuration()?;
     let paths = AppPaths::resolve(&app)?;
     let config = AppConfig::load(&paths.settings)?.normalized()?;
-    tauri::async_runtime::spawn_blocking(move || crate::meter_io::probe(&config))
-        .await
-        .map_err(|error| format!("RS485 test task failed: {error}"))
+    tauri::async_runtime::spawn_blocking(move || {
+        let _serial_guard = serial_guard;
+        crate::meter_io::probe(&config)
+    })
+    .await
+    .map_err(|error| format!("RS485 test task failed: {error}"))
 }
 
 #[tauri::command]
