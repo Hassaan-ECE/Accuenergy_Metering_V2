@@ -59,4 +59,5 @@ Register map: see `backend/src/domain/meter.rs` and legacy `Code/core/meter.py`.
 Follow Syed PDU-style signed NSIS + S-drive layout. **New updater keypair** for this product — do not reuse Inventory/PDU keys.
 
 Team install root: `S:\Engineering\Public\Syed_Hassaan_Shah\Accuenergy_Metering_V2\`  
-(The sibling `Accuenergy_Metering\` folder is the legacy Python drop + FTDI drivers.)
+FTDI VCP: `...\Accuenergy_Metering_V2\drivers\FTDI_VCP\`  
+(The sibling `Accuenergy_Metering\` folder is the legacy Python drop only.)
