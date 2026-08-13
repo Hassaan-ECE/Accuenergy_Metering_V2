@@ -147,6 +147,23 @@ export interface MeterSnapshot {
   summary: string;
 }
 
+export interface MeterDetectHit {
+  port: string;
+  baudrate: number;
+  deviceId: number;
+  parity: "N" | "E" | "O";
+  stopBits: 1 | 2;
+  message: string;
+}
+
+export interface MeterDetectResult {
+  found: boolean;
+  attempts: number;
+  hits: MeterDetectHit[];
+  config: AppConfig | null;
+  summary: string;
+}
+
 export interface MeterCommSettings {
   protocol: number;
   parityCode: number;
@@ -189,6 +206,10 @@ export interface StartMonitorResult {
 export interface MonitorRuntimeState {
   running: boolean;
   sessionId: string | null;
+}
+
+export function hasDisplayValues(values: MeterValues): boolean {
+  return Object.values(values).some((value) => value != null);
 }
 
 export function emptyValues(): MeterValues {

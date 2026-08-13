@@ -84,7 +84,21 @@ The implementation is considered software-complete when the persisted settings, 
 - Treat the X view as zoomed only when it is meaningfully smaller than the data extent. Require a six-pixel drag deadzone, clear the latch at full extent, and make Reset/double-click auto-range both X and Y.
 - Use explicit live/review dataset identity plus timestamp extent transitions so Start, entering review, exiting review, and empty-to-first-sample transitions clear zoom without disrupting normal live appends or a sliding 1,800-point buffer.
 - Keep hidden-series state derived from the active series signature, and cap zero-size mount retries while retaining `ResizeObserver` recovery.
-- Restore a compact Desktop/Demo/Connecting badge and `v0.1.0` cue in the header. Keep CSV loading in the download menu and label it `Export & load`.
+- Keep CSV loading in the download menu and label it `Export & load`. The header title is the product name only (no version or Desktop chip).
+- After Stop, the same control becomes Clear. Clear wipes live graphs, metric cards, counters, and probe status, keeps meter Settings, then disables until new live/test/review data appears.
+
+## Export save-as and simple CSV (2026-08-13)
+
+- CSV and HTML report always ask for a destination with the Tauri save dialog. Cancel leaves no file.
+- CSV rows are readings only: one `timestamp` (`YYYY-MM-DD HH:MM:SS` local) and the ten meter columns. Session identity, full ISO/unix times, and `config` stay in `<name>.settings.json`. Load still accepts older `ts_unix` / `ts_iso` columns.
+- Load CSV still accepts the older wide export if present; new exports restore settings from the sidecar.
+
+## Detect meter (2026-08-13)
+
+- Detect is a read-only scan beside Test RS485. It probes holding register `4000H` (FC03, 2 registers) like the Legacy_2 scan tool. It never writes meter communication registers.
+- Scan order: every detected COM port (Settings port first, then Windows-enumerated ports), current serial parameters with IDs 1–10 (current ID first), then common bauds at 8N1, then a smaller E/O and 2-stop pass. Timeout is 0.3 s with no retries. A port that will not open is skipped; the rest of the scan continues.
+- When a serial combo replies, remaining IDs are scanned at that combo only. If several IDs answer (daisy chain), keep the current device ID when it replied; otherwise use the lowest ID. App settings are saved only after a hit.
+- Detect uses the same exclusive serial guard as Test/configure and is disabled while monitoring.
 
 ## Verification boundary
 
@@ -93,4 +107,4 @@ The implementation is considered software-complete when the persisted settings, 
 - A duplicate desktop launch was not forced because this workspace already had its Vite server on port 5173 and `accuenergy-metering.exe` running; the existing owner processes were left untouched. The prior full Tauri launch remains the desktop verification boundary.
 - Windows reported no attached serial ports during verification. No live Modbus, meter response, real sample stream, or hardware-generated report is claimed.
 - Abrupt process termination or power loss can temporarily leave the latest session marked `running`; committed WAL readings remain available and the next idle desktop initialization finalizes the orphan. Normal UI close is intercepted and waits for the implemented stop/finalize path.
-- Signed installer publication and S-drive staging remain deferred; they are not required for the 0.1.0 parity target.
+- Team install root is `S:\Engineering\Public\Syed_Hassaan_Shah\Accuenergy_Metering_V2\` (created 2026-08-13). The sibling `Accuenergy_Metering\` folder stays the legacy Python drop and FTDI VCP drivers. No V2 installer is staged there until a signed 0.1.0 NSIS is built.

@@ -42,6 +42,17 @@ export function useDemoLiveStream() {
     if (stopped) pushLog("Demo stream stopped.");
   }, [pushLog]);
 
+  const clear = useCallback(() => {
+    stop();
+    setLatest(null);
+    setValues(emptyValues());
+    setGraph(emptyGraph());
+    setSampleCount(0);
+    setErrorCount(0);
+    setLiveHz(0);
+    pushLog("Live display cleared.");
+  }, [pushLog, stop]);
+
   const start = useCallback(() => {
     if (timerRef.current !== null) {
       return;
@@ -104,6 +115,7 @@ export function useDemoLiveStream() {
     liveHz,
     start,
     stop,
+    clear,
     pushLog,
     isRunning: status === "running" || status === "connecting" || status === "stopping",
   };

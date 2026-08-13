@@ -1,5 +1,6 @@
 use std::path::Path;
 
+use chrono::{DateTime, Local, NaiveDateTime, TimeZone};
 use csv::StringRecord;
 use serde::Serialize;
 
@@ -74,34 +75,41 @@ fn load_csv_with_limit(path: &Path, maximum_points: usize) -> Result<ReviewDatas
         .map_err(|error| format!("Could not read CSV header: {error}"))?
         .clone();
     let columns = CsvColumns::from_headers(&headers)?;
+    let sidecar = load_settings_sidecar(path);
 
     let mut readings = Vec::new();
-    let mut session_id: Option<String> = None;
-    let mut started_at: Option<String> = None;
-    let mut ended_at: Option<String> = None;
-    let mut status: Option<String> = None;
-    let mut stop_reason: Option<String> = None;
-    let mut sample_count: Option<u64> = None;
-    let mut error_count: Option<u64> = None;
-    let mut config: Option<AppConfig> = None;
+    let mut session_id: Option<String> = sidecar
+        .as_ref()
+        .map(|settings| settings.session_id.clone());
+    let mut started_at: Option<String> = sidecar.as_ref().map(|settings| settings.started_at.clone());
+    let mut ended_at: Option<String> = sidecar.as_ref().and_then(|settings| settings.ended_at.clone());
+    let mut status: Option<String> = sidecar.as_ref().map(|settings| settings.status.clone());
+    let mut stop_reason: Option<String> = sidecar
+        .as_ref()
+        .and_then(|settings| settings.stop_reason.clone());
+    let mut sample_count: Option<u64> = sidecar.as_ref().map(|settings| settings.sample_count);
+    let mut error_count: Option<u64> = sidecar.as_ref().map(|settings| settings.error_count);
+    let mut config: Option<AppConfig> = sidecar.as_ref().map(|settings| settings.config.clone());
 
     for (record_index, record) in reader.records().enumerate() {
         let line_number = record_index + 2;
         let record =
             record.map_err(|error| format!("Could not read CSV row {line_number}: {error}"))?;
-        let row_session_id = required_text(&record, columns.session_id, "session_id", line_number)?;
-        match session_id.as_deref() {
-            Some(expected) if expected != row_session_id => {
-                return Err(format!(
-                    "CSV row {line_number} belongs to session {row_session_id}, expected {expected}."
-                ));
+        if let Some(session_id_column) = columns.session_id {
+            let row_session_id =
+                required_text(&record, session_id_column, "session_id", line_number)?;
+            match session_id.as_deref() {
+                Some(expected) if expected != row_session_id => {
+                    return Err(format!(
+                        "CSV row {line_number} belongs to session {row_session_id}, expected {expected}."
+                    ));
+                }
+                None => session_id = Some(row_session_id.to_string()),
+                _ => {}
             }
-            None => session_id = Some(row_session_id.to_string()),
-            _ => {}
         }
 
-        let ts_unix = parse_required_f64(&record, columns.ts_unix, "ts_unix", line_number)?;
-        let ts_iso = required_text(&record, columns.ts_iso, "ts_iso", line_number)?.to_string();
+        let (ts_unix, ts_iso) = parse_row_timestamp(&record, &columns, line_number)?;
         let values = MeterValues {
             frequency_hz: parse_optional_f64(
                 &record,
@@ -153,29 +161,41 @@ fn load_csv_with_limit(path: &Path, maximum_points: usize) -> Result<ReviewDatas
             return Err(format!("CSV row {line_number} contains no meter values."));
         }
         readings.push(ReadingRow {
-            session_id: row_session_id.to_string(),
+            session_id: session_id.clone().unwrap_or_else(|| "imported".into()),
             ts_unix,
             ts_iso,
             values,
         });
 
         if record_index == 0 {
-            started_at = optional_text(&record, columns.session_started_at);
-            ended_at = optional_text(&record, columns.session_ended_at);
-            status = optional_text(&record, columns.session_status);
-            stop_reason = optional_text(&record, columns.session_stop_reason);
-            sample_count = parse_optional_u64(
+            if let Some(value) = optional_text(&record, columns.session_started_at) {
+                started_at = Some(value);
+            }
+            if let Some(value) = optional_text(&record, columns.session_ended_at) {
+                ended_at = Some(value);
+            }
+            if let Some(value) = optional_text(&record, columns.session_status) {
+                status = Some(value);
+            }
+            if let Some(value) = optional_text(&record, columns.session_stop_reason) {
+                stop_reason = Some(value);
+            }
+            if let Some(value) = parse_optional_u64(
                 &record,
                 columns.session_sample_count,
                 "session_sample_count",
                 line_number,
-            )?;
-            error_count = parse_optional_u64(
+            )? {
+                sample_count = Some(value);
+            }
+            if let Some(value) = parse_optional_u64(
                 &record,
                 columns.session_error_count,
                 "session_error_count",
                 line_number,
-            )?;
+            )? {
+                error_count = Some(value);
+            }
             if let Some(config_json) = optional_text(&record, columns.config_json) {
                 config = Some(
                     serde_json::from_str::<AppConfig>(&config_json)
@@ -203,8 +223,13 @@ fn load_csv_with_limit(path: &Path, maximum_points: usize) -> Result<ReviewDatas
         .ts_iso
         .clone();
     let config_available = config.is_some();
+    let fallback_session_id = path
+        .file_stem()
+        .map(|stem| stem.to_string_lossy().into_owned())
+        .filter(|stem| !stem.is_empty())
+        .unwrap_or_else(|| "imported".into());
     let session = SessionRecord {
-        session_id: session_id.expect("a reading supplies a session id"),
+        session_id: session_id.unwrap_or(fallback_session_id),
         started_at: started_at.unwrap_or(first_timestamp),
         ended_at: Some(ended_at.unwrap_or(last_timestamp)),
         status: status.unwrap_or_else(|| "imported".into()),
@@ -227,7 +252,7 @@ fn load_csv_with_limit(path: &Path, maximum_points: usize) -> Result<ReviewDatas
 }
 
 struct CsvColumns {
-    session_id: usize,
+    session_id: Option<usize>,
     session_started_at: Option<usize>,
     session_ended_at: Option<usize>,
     session_status: Option<usize>,
@@ -235,8 +260,9 @@ struct CsvColumns {
     session_sample_count: Option<usize>,
     session_error_count: Option<usize>,
     config_json: Option<usize>,
-    ts_unix: usize,
-    ts_iso: usize,
+    timestamp: Option<usize>,
+    ts_unix: Option<usize>,
+    ts_iso: Option<usize>,
     frequency_hz: usize,
     phase_voltage_v1: usize,
     phase_voltage_v2: usize,
@@ -251,8 +277,8 @@ struct CsvColumns {
 
 impl CsvColumns {
     fn from_headers(headers: &StringRecord) -> Result<Self, String> {
-        Ok(Self {
-            session_id: required_header(headers, "session_id")?,
+        let columns = Self {
+            session_id: header_index(headers, "session_id"),
             session_started_at: header_index(headers, "session_started_at"),
             session_ended_at: header_index(headers, "session_ended_at"),
             session_status: header_index(headers, "session_status"),
@@ -260,8 +286,9 @@ impl CsvColumns {
             session_sample_count: header_index(headers, "session_sample_count"),
             session_error_count: header_index(headers, "session_error_count"),
             config_json: header_index(headers, "config_json"),
-            ts_unix: required_header(headers, "ts_unix")?,
-            ts_iso: required_header(headers, "ts_iso")?,
+            timestamp: header_index(headers, "timestamp"),
+            ts_unix: header_index(headers, "ts_unix"),
+            ts_iso: header_index(headers, "ts_iso"),
             frequency_hz: required_header(headers, "frequency_hz")?,
             phase_voltage_v1: required_header(headers, "phase_voltage_v1")?,
             phase_voltage_v2: required_header(headers, "phase_voltage_v2")?,
@@ -272,8 +299,74 @@ impl CsvColumns {
             current_i3: required_header(headers, "current_i3")?,
             active_power_p1: required_header(headers, "active_power_p1")?,
             power_factor_pf1: required_header(headers, "power_factor_pf1")?,
-        })
+        };
+        if columns.timestamp.is_none() && columns.ts_iso.is_none() && columns.ts_unix.is_none() {
+            return Err(
+                "CSV is missing a time column. Export again from this app or include 'timestamp'."
+                    .into(),
+            );
+        }
+        Ok(columns)
     }
+}
+
+fn parse_row_timestamp(
+    record: &StringRecord,
+    columns: &CsvColumns,
+    line_number: usize,
+) -> Result<(f64, String), String> {
+    if let Some(index) = columns.timestamp {
+        return parse_flexible_timestamp(
+            required_text(record, index, "timestamp", line_number)?,
+            line_number,
+        );
+    }
+    if let Some(index) = columns.ts_iso {
+        return parse_flexible_timestamp(
+            required_text(record, index, "ts_iso", line_number)?,
+            line_number,
+        );
+    }
+    if let Some(index) = columns.ts_unix {
+        let unix = parse_required_f64(record, index, "ts_unix", line_number)?;
+        return Ok((unix, iso_from_unix(unix)));
+    }
+    Err(format!("CSV row {line_number} has no timestamp."))
+}
+
+fn parse_flexible_timestamp(text: &str, line_number: usize) -> Result<(f64, String), String> {
+    if let Ok(unix) = text.parse::<f64>() {
+        if unix.is_finite() {
+            return Ok((unix, iso_from_unix(unix)));
+        }
+    }
+    if let Ok(parsed) = DateTime::parse_from_rfc3339(text) {
+        return Ok((parsed.timestamp_millis() as f64 / 1000.0, parsed.to_rfc3339()));
+    }
+    if let Ok(naive) = NaiveDateTime::parse_from_str(text, "%Y-%m-%d %H:%M:%S") {
+        if let Some(local) = Local.from_local_datetime(&naive).single() {
+            return Ok((local.timestamp_millis() as f64 / 1000.0, local.to_rfc3339()));
+        }
+    }
+    Err(format!("CSV row {line_number} has an invalid timestamp: {text}"))
+}
+
+fn iso_from_unix(unix: f64) -> String {
+    let seconds = unix.trunc() as i64;
+    let nanos = ((unix.fract().abs()) * 1_000_000_000.0).round() as u32;
+    TimeZone::timestamp_opt(&Local, seconds, nanos)
+        .single()
+        .map(|timestamp| timestamp.to_rfc3339())
+        .unwrap_or_default()
+}
+
+fn load_settings_sidecar(csv_path: &Path) -> Option<crate::report::SessionSettingsFile> {
+    let path = crate::report::settings_sidecar_path(csv_path);
+    if !path.is_file() {
+        return None;
+    }
+    let raw = std::fs::read_to_string(path).ok()?;
+    serde_json::from_str(&raw).ok()
 }
 
 fn header_index(headers: &StringRecord, name: &str) -> Option<usize> {
@@ -531,7 +624,7 @@ mod tests {
         )
         .unwrap();
         drop(connection);
-        let csv_path = crate::report::export_csv(&paths, "run_csv").unwrap();
+        let csv_path = crate::report::export_csv(&paths, "run_csv", None).unwrap();
 
         let review = load_csv(&csv_path).unwrap();
 
@@ -548,10 +641,14 @@ mod tests {
     fn rejects_csv_missing_required_columns() {
         let temp = tempdir().unwrap();
         let path = temp.path().join("bad.csv");
-        std::fs::write(&path, "session_id,ts_unix\nrun_bad,1\n").unwrap();
+        std::fs::write(
+            &path,
+            "frequency_hz,phase_voltage_v1,phase_voltage_v2,phase_voltage_v3,line_voltage_v12,current_i1,current_i2,current_i3,active_power_p1,power_factor_pf1\n60,120,120,120,208,1,1,1,120,1\n",
+        )
+        .unwrap();
 
         let error = load_csv(&path).unwrap_err();
 
-        assert!(error.contains("missing required column 'ts_iso'"));
+        assert!(error.contains("missing a time column"));
     }
 }

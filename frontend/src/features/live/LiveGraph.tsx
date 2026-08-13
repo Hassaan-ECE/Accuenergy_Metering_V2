@@ -230,18 +230,23 @@ function interactionPlugin(onZoomChange: (zoomed: boolean) => void): uPlot.Plugi
   };
 }
 
+function graphThemeColors(theme: "light" | "dark") {
+  return theme === "dark"
+    ? { grid: "rgba(255,255,255,0.08)", text: "rgba(255,255,255,0.58)" }
+    : { grid: "rgba(0,0,0,0.08)", text: "rgba(0,0,0,0.55)" };
+}
+
 function buildOptions(
   width: number,
   height: number,
-  theme: "light" | "dark",
+  getTheme: () => "light" | "dark",
   unit: string,
   secondaryUnit: string | undefined,
   lines: LineDef[],
   onZoomChange: (zoomed: boolean) => void,
 ): uPlot.Options {
-  const isDark = theme === "dark";
-  const grid = isDark ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.08)";
-  const text = isDark ? "rgba(255,255,255,0.58)" : "rgba(0,0,0,0.55)";
+  const grid = () => graphThemeColors(getTheme()).grid;
+  const text = () => graphThemeColors(getTheme()).text;
   const hasSecondaryScale = lines.some((line) => line.scale === "y2");
 
   return {
@@ -323,6 +328,7 @@ function buildOptions(
 export function LiveGraph({ datasetId, lines, secondaryUnit, theme, times, title, unit }: LiveGraphProps) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const plotRef = useRef<uPlot | null>(null);
+  const themeRef = useRef(theme);
   const dataRef = useRef({ datasetId, lines, times });
   const datasetRef = useRef<{ id: string; extent: GraphDatasetExtent | null } | null>(null);
   const zoomedRef = useRef(false);
@@ -355,6 +361,11 @@ export function LiveGraph({ datasetId, lines, secondaryUnit, theme, times, title
   }, [hiddenKeys]);
 
   useEffect(() => {
+    themeRef.current = theme;
+    plotRef.current?.redraw(false, true);
+  }, [theme]);
+
+  useEffect(() => {
     const host = hostRef.current;
     if (!host) return;
 
@@ -380,7 +391,7 @@ export function LiveGraph({ datasetId, lines, secondaryUnit, theme, times, title
       }
 
       plot = new uPlot(
-        buildOptions(plotWidth, plotHeight, theme, unit, secondaryUnit, defs, onZoomChange),
+        buildOptions(plotWidth, plotHeight, () => themeRef.current, unit, secondaryUnit, defs, onZoomChange),
         alignedData(dataRef.current.times, dataRef.current.lines),
         node,
       );
@@ -419,7 +430,7 @@ export function LiveGraph({ datasetId, lines, secondaryUnit, theme, times, title
       plot?.destroy();
       if (plotRef.current === plot) plotRef.current = null;
     };
-  }, [lineSignature, onZoomChange, secondaryUnit, theme, unit]);
+  }, [lineSignature, onZoomChange, secondaryUnit, unit]);
 
   useEffect(() => {
     const plot = plotRef.current;

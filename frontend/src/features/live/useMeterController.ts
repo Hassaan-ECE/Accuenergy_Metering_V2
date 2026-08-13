@@ -5,11 +5,13 @@ import {
   DEFAULT_CONFIG,
   emptyGraph,
   emptyValues,
+  hasDisplayValues,
   graphFromReviewReadings,
   type AppConfig,
   type ApplyMeterDefaultsRequest,
   type GraphBuffer,
   type LiveUpdate,
+  type MeterDetectResult,
   type MeterSnapshot,
   type MeterConfigPreview,
   type MeterValues,
@@ -23,6 +25,7 @@ import {
 import { useDemoLiveStream } from "./useDemoLiveStream";
 import {
   applyMeterDefaults,
+  detectMeter,
   exportSessionCsv,
   generateReport,
   getAppPaths,
@@ -99,6 +102,7 @@ export function useMeterController() {
   const [probeStatus, setProbeStatus] = useState<"RS485 OK" | "No reply" | null>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
   const [testing, setTesting] = useState(false);
+  const [detecting, setDetecting] = useState(false);
   const [savingConfig, setSavingConfig] = useState(false);
   const [refreshingPorts, setRefreshingPorts] = useState(false);
   const [reporting, setReporting] = useState(false);
@@ -141,16 +145,57 @@ export function useMeterController() {
     return next;
   }, []);
 
+  const chooseSavePath = useCallback(
+    async (options: {
+      title: string;
+      defaultFileName: string;
+      defaultFolder?: string | null;
+      filters: Array<{ name: string; extensions: string[] }>;
+    }) => {
+      const { save } = await import("@tauri-apps/plugin-dialog");
+      const folder = options.defaultFolder ?? paths?.root;
+      const defaultPath = folder ? `${folder}\\${options.defaultFileName}` : options.defaultFileName;
+      const selected = await save({
+        title: options.title,
+        defaultPath,
+        filters: options.filters,
+      });
+      if (!selected || Array.isArray(selected)) return null;
+      return selected;
+    },
+    [paths?.root],
+  );
+
+  const openUserFile = useCallback(async (path: string) => {
+    try {
+      const { openPath: openChosenPath } = await import("@tauri-apps/plugin-opener");
+      await openChosenPath(path);
+    } catch {
+      try {
+        await openPath(path);
+      } catch {
+        // The user already has the full path in the notice if the OS opener is unavailable.
+      }
+    }
+  }, []);
+
   const generateAndOpen = useCallback(
     async (sessionId: string) => {
+      const dest = await chooseSavePath({
+        title: "Save HTML report",
+        defaultFileName: `accuenergy_report_${sessionId}.html`,
+        defaultFolder: paths?.reports,
+        filters: [{ name: "HTML report", extensions: ["html"] }],
+      });
+      if (!dest) return;
       setReporting(true);
       try {
-        const path = await generateReport(sessionId);
+        const path = await generateReport(sessionId, dest);
         setLastReportPath(path);
         pushLog(`Report saved: ${path}`);
-        await openPath(path);
+        await openUserFile(path);
         await refreshSessions();
-        showNotice("success", "Report ready", "The self-contained HTML report opened in your default browser.");
+        showNotice("success", "Report saved", `Saved to ${path} and opened if a browser was available.`);
       } catch (error) {
         const message = String(error);
         pushLog(`Report failed: ${message}`);
@@ -159,7 +204,7 @@ export function useMeterController() {
         setReporting(false);
       }
     },
-    [pushLog, refreshSessions, showNotice],
+    [chooseSavePath, openUserFile, paths?.reports, pushLog, refreshSessions, showNotice],
   );
 
   const resolveMonitorEnd = useCallback(() => {
@@ -471,6 +516,40 @@ export function useMeterController() {
     }
   }, [pushDemoLog, pushLog, review, runtime, showNotice]);
 
+  const detect = useCallback(async (): Promise<MeterDetectResult | null> => {
+    if (review) {
+      showNotice("warning", "Review mode is read-only", "Exit review before detecting a meter.");
+      return null;
+    }
+    if (runtime !== "desktop") {
+      pushDemoLog("Meter detect is only available in the desktop app.");
+      return null;
+    }
+    setDetecting(true);
+    setProbeStatus(null);
+    try {
+      const result = await detectMeter();
+      result.summary.split("\n").forEach((line) => pushLog(line || " "));
+      if (result.config) setConfig(result.config);
+      setProbeStatus(result.found ? "RS485 OK" : "No reply");
+      showNotice(
+        result.found ? "success" : "warning",
+        result.found ? "Meter detected" : "No meter found",
+        result.found
+          ? `Using ${result.config?.port ?? "the current port"}, device ${result.config?.deviceId ?? "?"}, ${result.config?.baudrate ?? "?"} baud.`
+          : result.summary,
+      );
+      return result;
+    } catch (error) {
+      setProbeStatus("No reply");
+      pushLog(`Meter detect failed: ${String(error)}`);
+      showNotice("error", "Meter detect failed", String(error));
+      return null;
+    } finally {
+      setDetecting(false);
+    }
+  }, [pushDemoLog, pushLog, review, runtime, showNotice]);
+
   const previewMeterConfig = useCallback(
     async (targetDeviceId: number, targetBaudrate: number): Promise<MeterConfigPreview | null> => {
       if (review) {
@@ -679,12 +758,25 @@ export function useMeterController() {
   const exportCsv = useCallback(
     async (sessionId: string) => {
       if (runtime !== "desktop") return;
+      const dest = await chooseSavePath({
+        title: "Save session CSV",
+        defaultFileName: `accuenergy_readings_${sessionId}.csv`,
+        defaultFolder: paths?.exports,
+        filters: [{ name: "CSV", extensions: ["csv"] }],
+      });
+      if (!dest) return;
       setExportingSessionId(sessionId);
       try {
-        const path = await exportSessionCsv(sessionId);
+        const path = await exportSessionCsv(sessionId, dest);
+        const settingsPath = path.replace(/\.csv$/i, ".settings.json");
         pushLog(`CSV exported: ${path}`);
-        await openPath(path);
-        showNotice("success", "CSV exported", `Saved to ${path} and opened in your default CSV application.`);
+        pushLog(`Session settings saved: ${settingsPath}`);
+        await openUserFile(path);
+        showNotice(
+          "success",
+          "CSV exported",
+          `Readings saved to ${path}. Session settings saved once beside it as ${settingsPath}.`,
+        );
       } catch (error) {
         pushLog(`CSV export failed: ${String(error)}`);
         showNotice("error", "CSV export failed", String(error));
@@ -692,7 +784,7 @@ export function useMeterController() {
         setExportingSessionId(null);
       }
     },
-    [pushLog, runtime, showNotice],
+    [chooseSavePath, openUserFile, paths?.exports, pushLog, runtime, showNotice],
   );
 
   const exportCurrentCsv = useCallback(async () => {
@@ -800,6 +892,24 @@ export function useMeterController() {
 
   const dismissNotice = useCallback(() => setNotice(null), []);
 
+  const clearDisplay = useCallback(() => {
+    if (runtime === "browser") {
+      demo.clear();
+      setProbeStatus(null);
+      return;
+    }
+    if (review) setReview(null);
+    setValues(emptyValues());
+    setGraph(emptyGraph());
+    setLatestUpdate(null);
+    setSampleCount(0);
+    setErrorCount(0);
+    setLiveHz(0);
+    setProbeStatus(null);
+    if (status === "error") setStatus("idle");
+    pushLog("Live display cleared.");
+  }, [demo, pushLog, review, runtime, status]);
+
   const usingDemo = runtime === "browser";
   const reviewGraph = useMemo(() => (review ? graphFromReviewReadings(review.readings) : null), [review]);
   const reviewValues = review?.readings.at(-1)?.values ?? null;
@@ -812,6 +922,15 @@ export function useMeterController() {
   const activeLiveHz = review ? 0 : usingDemo ? demo.liveHz : liveHz;
   const activeLogs = usingDemo ? demo.logLines : logLines;
   const isRunning = activeStatus === "connecting" || activeStatus === "running" || activeStatus === "stopping";
+  const liveHasData =
+    graph.times.length > 0 ||
+    sampleCount > 0 ||
+    errorCount > 0 ||
+    hasDisplayValues(values) ||
+    probeStatus !== null;
+  const demoHasData =
+    demo.graph.times.length > 0 || demo.sampleCount > 0 || hasDisplayValues(demo.values);
+  const canClear = !isRunning && (review !== null || (usingDemo ? demoHasData : liveHasData));
   const latestSession = useMemo(
     () => review?.session ?? sessions.find((session) => session.sessionId === currentSessionId) ?? sessions[0] ?? null,
     [currentSessionId, review, sessions],
@@ -839,6 +958,7 @@ export function useMeterController() {
     probeStatus,
     notice,
     testing,
+    detecting,
     savingConfig,
     refreshingPorts,
     reporting,
@@ -847,9 +967,12 @@ export function useMeterController() {
     meterConfigPreview,
     meterConfigAction,
     isRunning,
+    canClear,
     start,
     stop,
+    clearDisplay,
     test,
+    detect,
     previewMeterConfig,
     applyMeterConfig,
     clearMeterConfigPreview,

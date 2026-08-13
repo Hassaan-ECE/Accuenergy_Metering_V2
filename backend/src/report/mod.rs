@@ -1,6 +1,11 @@
-use std::{fmt::Write as _, fs, path::PathBuf};
+use std::{
+    fmt::Write as _,
+    fs,
+    path::{Path, PathBuf},
+};
 
 use chrono::Local;
+use serde::{Deserialize, Serialize};
 
 use crate::{
     domain::{config::AppConfig, meter::ACUVIM_BASIC_TARGETS},
@@ -20,7 +25,32 @@ struct MetricStats {
     std_dev: f64,
 }
 
-pub fn generate(paths: &AppPaths, session_id: &str) -> Result<PathBuf, String> {
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionSettingsFile {
+    pub session_id: String,
+    pub started_at: String,
+    pub ended_at: Option<String>,
+    pub status: String,
+    pub stop_reason: Option<String>,
+    pub sample_count: u64,
+    pub error_count: u64,
+    pub config: AppConfig,
+}
+
+pub fn settings_sidecar_path(csv_path: &Path) -> PathBuf {
+    let stem = csv_path
+        .file_stem()
+        .map(|stem| stem.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "session".into());
+    csv_path.with_file_name(format!("{stem}.settings.json"))
+}
+
+pub fn generate(
+    paths: &AppPaths,
+    session_id: &str,
+    dest: Option<&Path>,
+) -> Result<PathBuf, String> {
     let session =
         storage::require_finalized_session(&paths.database, session_id, "generating a report")?;
     let readings = storage::load_readings(&paths.database, session_id)?;
@@ -141,44 +171,49 @@ pub fn generate(paths: &AppPaths, session_id: &str) -> Result<PathBuf, String> {
     )
     .replace("\\\"", "\"");
 
-    fs::create_dir_all(&paths.reports)
-        .map_err(|error| format!("Could not create report directory: {error}"))?;
-    let output = paths
-        .reports
-        .join(format!("accuenergy_report_{session_id}.html"));
+    let output = dest
+        .map(|path| ensure_extension(path, "html"))
+        .unwrap_or_else(|| {
+            paths
+                .reports
+                .join(format!("accuenergy_report_{session_id}.html"))
+        });
+    if let Some(parent) = output.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|error| format!("Could not create report directory: {error}"))?;
+    }
     fs::write(&output, report_html)
         .map_err(|error| format!("Could not write HTML report: {error}"))?;
     storage::update_report_path(&paths.database, session_id, &output)?;
     Ok(output)
 }
 
-pub fn export_csv(paths: &AppPaths, session_id: &str) -> Result<PathBuf, String> {
+pub fn export_csv(
+    paths: &AppPaths,
+    session_id: &str,
+    dest: Option<&Path>,
+) -> Result<PathBuf, String> {
     let session = storage::require_finalized_session(&paths.database, session_id, "exporting CSV")?;
     let readings = storage::load_readings(&paths.database, session_id)?;
     if readings.is_empty() {
         return Err("This session has no readings to export.".into());
     }
-    fs::create_dir_all(&paths.exports)
-        .map_err(|error| format!("Could not create export directory: {error}"))?;
-    let output = paths
-        .exports
-        .join(format!("accuenergy_readings_{session_id}.csv"));
+    let output = dest
+        .map(|path| ensure_extension(path, "csv"))
+        .unwrap_or_else(|| {
+            paths
+                .exports
+                .join(format!("accuenergy_readings_{session_id}.csv"))
+        });
+    if let Some(parent) = output.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|error| format!("Could not create export directory: {error}"))?;
+    }
     let mut writer = csv::Writer::from_path(&output)
         .map_err(|error| format!("Could not create CSV export: {error}"))?;
-    let config_json = serde_json::to_string(&session.config)
-        .map_err(|error| format!("Could not serialize session settings for CSV: {error}"))?;
     writer
         .write_record([
-            "session_id",
-            "session_started_at",
-            "session_ended_at",
-            "session_status",
-            "session_stop_reason",
-            "session_sample_count",
-            "session_error_count",
-            "config_json",
-            "ts_unix",
-            "ts_iso",
+            "timestamp",
             "frequency_hz",
             "phase_voltage_v1",
             "phase_voltage_v2",
@@ -194,16 +229,7 @@ pub fn export_csv(paths: &AppPaths, session_id: &str) -> Result<PathBuf, String>
     for row in readings {
         writer
             .write_record([
-                row.session_id,
-                session.started_at.clone(),
-                session.ended_at.clone().unwrap_or_default(),
-                session.status.clone(),
-                session.stop_reason.clone().unwrap_or_default(),
-                session.sample_count.to_string(),
-                session.error_count.to_string(),
-                config_json.clone(),
-                format_float(row.ts_unix),
-                row.ts_iso,
+                format_csv_timestamp(row.ts_unix, &row.ts_iso),
                 optional_csv(row.values.frequency_hz),
                 optional_csv(row.values.phase_voltage_v1),
                 optional_csv(row.values.phase_voltage_v2),
@@ -220,7 +246,42 @@ pub fn export_csv(paths: &AppPaths, session_id: &str) -> Result<PathBuf, String>
     writer
         .flush()
         .map_err(|error| format!("Could not finalize CSV export: {error}"))?;
+
+    let settings_path = settings_sidecar_path(&output);
+    let settings = SessionSettingsFile {
+        session_id: session.session_id,
+        started_at: session.started_at,
+        ended_at: session.ended_at,
+        status: session.status,
+        stop_reason: session.stop_reason,
+        sample_count: session.sample_count,
+        error_count: session.error_count,
+        config: session.config,
+    };
+    let settings_json = serde_json::to_string_pretty(&settings)
+        .map_err(|error| format!("Could not serialize session settings file: {error}"))?;
+    fs::write(&settings_path, settings_json)
+        .map_err(|error| format!("Could not write session settings file: {error}"))?;
     Ok(output)
+}
+
+fn format_csv_timestamp(ts_unix: f64, ts_iso: &str) -> String {
+    if let Ok(parsed) = chrono::DateTime::parse_from_rfc3339(ts_iso) {
+        return parsed.with_timezone(&Local).format("%Y-%m-%d %H:%M:%S").to_string();
+    }
+    let seconds = ts_unix.trunc() as i64;
+    let nanos = ((ts_unix.fract().abs()) * 1_000_000_000.0).round() as u32;
+    chrono::TimeZone::timestamp_opt(&Local, seconds, nanos)
+        .single()
+        .map(|timestamp| timestamp.format("%Y-%m-%d %H:%M:%S").to_string())
+        .unwrap_or_else(|| format_float(ts_unix))
+}
+
+fn ensure_extension(path: &Path, extension: &str) -> PathBuf {
+    match path.extension().and_then(|value| value.to_str()) {
+        Some(existing) if existing.eq_ignore_ascii_case(extension) => path.to_path_buf(),
+        _ => path.with_extension(extension),
+    }
 }
 
 fn latest_values_html(reading: &ReadingRow) -> String {
@@ -536,7 +597,7 @@ mod tests {
         .unwrap();
         drop(connection);
 
-        let report = generate(&paths, "run_report").unwrap();
+        let report = generate(&paths, "run_report", None).unwrap();
         let html = fs::read_to_string(report).unwrap();
         assert!(html.contains("Summary Statistics"));
         assert!(html.contains("<svg"));
@@ -544,13 +605,19 @@ mod tests {
         assert!(!html.contains("<link"));
         assert!(!html.contains("src=\"http"));
 
-        let csv = export_csv(&paths, "run_report").unwrap();
-        let csv_text = fs::read_to_string(csv).unwrap();
+        let csv = export_csv(&paths, "run_report", None).unwrap();
+        let csv_text = fs::read_to_string(&csv).unwrap();
         assert!(csv_text.contains("frequency_hz"));
         assert!(csv_text.contains("60.1"));
-        assert!(csv_text.contains("session_started_at"));
-        assert!(csv_text.contains("config_json"));
-        assert!(csv_text.contains("\"\"deviceId\"\":1"));
+        assert!(!csv_text.contains("config_json"));
+        assert!(!csv_text.contains("session_started_at"));
+        assert!(!csv_text.contains("ts_unix"));
+        assert!(!csv_text.contains("ts_iso"));
+        assert!(csv_text.lines().next().unwrap().starts_with("timestamp,frequency_hz,"));
+
+        let settings_text = fs::read_to_string(settings_sidecar_path(&csv)).unwrap();
+        assert!(settings_text.contains("\"sessionId\": \"run_report\""));
+        assert!(settings_text.contains("\"deviceId\": 1"));
     }
 
     #[test]
@@ -577,7 +644,7 @@ mod tests {
         storage::flush_readings(&mut connection, &mut batch).unwrap();
         drop(connection);
 
-        let report_error = generate(&paths, "run_in_progress").unwrap_err();
+        let report_error = generate(&paths, "run_in_progress", None).unwrap_err();
         assert!(report_error.contains("not finalized"));
         assert!(report_error.contains("session to finish"));
         assert!(report_error.contains("generating a report"));
@@ -586,7 +653,7 @@ mod tests {
             .join("accuenergy_report_run_in_progress.html")
             .exists());
 
-        let csv_error = export_csv(&paths, "run_in_progress").unwrap_err();
+        let csv_error = export_csv(&paths, "run_in_progress", None).unwrap_err();
         assert!(csv_error.contains("not finalized"));
         assert!(csv_error.contains("session to finish"));
         assert!(csv_error.contains("exporting CSV"));
@@ -602,11 +669,11 @@ mod tests {
         let paths = AppPaths::from_root(temp.path().join("app-data")).unwrap();
 
         assert_eq!(
-            generate(&paths, "run_missing").unwrap_err(),
+            generate(&paths, "run_missing", None).unwrap_err(),
             "Session not found: run_missing"
         );
         assert_eq!(
-            export_csv(&paths, "run_missing").unwrap_err(),
+            export_csv(&paths, "run_missing", None).unwrap_err(),
             "Session not found: run_missing"
         );
 
@@ -626,11 +693,11 @@ mod tests {
         drop(connection);
 
         assert_eq!(
-            generate(&paths, "run_empty").unwrap_err(),
+            generate(&paths, "run_empty", None).unwrap_err(),
             "Not enough samples to generate a report."
         );
         assert_eq!(
-            export_csv(&paths, "run_empty").unwrap_err(),
+            export_csv(&paths, "run_empty", None).unwrap_err(),
             "This session has no readings to export."
         );
     }

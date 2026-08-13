@@ -93,8 +93,9 @@ If Device Manager shows **FT232R USB UART** with **Code 28** / no COMx port, ins
 
 | | Path |
 |--|------|
-| **Team (use this on other machines)** | `S:\Engineering\Public\Syed_Hassaan_Shah\Accuenergy_Metering\drivers\FTDI_VCP\` |
-| Local copy | `release-support\drivers\FTDI_VCP\` (gitignored; not in GitHub) |
+| **V2 installer (when published)** | `S:\Engineering\Public\Syed_Hassaan_Shah\Accuenergy_Metering_V2\` |
+| **FTDI VCP (other PCs, Code 28 / no COMx)** | `S:\Engineering\Public\Syed_Hassaan_Shah\Accuenergy_Metering\drivers\FTDI_VCP\` |
+| Local driver copy | `release-support\drivers\FTDI_VCP\` (gitignored; not in GitHub) |
 
 Run `CDM21228_Setup.exe` as Administrator, then set the new **COMx** in Settings. Full steps and SHA256: `README.md` in that folder.
 

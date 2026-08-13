@@ -1,7 +1,6 @@
 import { Moon, PanelRightClose, PanelRightOpen, Sun } from "lucide-react";
 
-import { APP_NAME, APP_VERSION } from "@/app/branding";
-import type { RuntimeMode } from "@/features/live/useMeterController";
+import { APP_NAME } from "@/app/branding";
 import type { ThemeMode } from "@/platform/ui/theme";
 import { Button } from "@/shared/components/ui/button";
 import { cn } from "@/shared/lib/utils";
@@ -15,7 +14,6 @@ interface ShellHeaderProps {
   onThemeToggle: () => void;
   configSummary: string;
   exportActions: HeaderMenuAction[];
-  runtime: RuntimeMode;
   settingsActions: HeaderMenuAction[];
   statusText: string;
   statusTone: HeaderStatusTone;
@@ -29,7 +27,6 @@ export function ShellHeader({
   onThemeToggle,
   configSummary,
   exportActions,
-  runtime,
   settingsActions,
   statusText,
   statusTone,
@@ -41,20 +38,7 @@ export function ShellHeader({
     <header className="relative z-40 shrink-0 border-b border-border bg-card/80 px-3 py-2 backdrop-blur sm:px-4">
       <div className="flex items-center justify-between gap-3">
         <div className="flex min-w-0 flex-1 items-center gap-x-2.5">
-          <div className="flex shrink-0 items-center gap-1.5">
-            <h1 className="text-base font-semibold leading-none tracking-tight sm:text-lg">{APP_NAME}</h1>
-            <span className="text-[10px] font-medium text-muted-foreground">v{APP_VERSION}</span>
-            <span
-              className={cn(
-                "rounded-full border px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide",
-                runtime === "desktop" && "border-success/30 bg-success/10 text-success-foreground",
-                runtime === "browser" && "border-warning/40 bg-warning/10 text-warning-foreground",
-                runtime === "checking" && "border-border bg-muted text-muted-foreground",
-              )}
-            >
-              {runtime === "desktop" ? "Desktop" : runtime === "browser" ? "Demo" : "Connecting"}
-            </span>
-          </div>
+          <h1 className="shrink-0 text-base font-semibold leading-none tracking-tight sm:text-lg">{APP_NAME}</h1>
           <p
             className="min-w-0 truncate font-mono text-[11px] leading-none text-muted-foreground/90"
             title={configSummary}

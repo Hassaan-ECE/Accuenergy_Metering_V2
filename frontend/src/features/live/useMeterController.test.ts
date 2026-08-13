@@ -5,6 +5,7 @@ import {
   DEFAULT_CONFIG,
   emptyValues,
   type MeterConfigPreview,
+  type LiveUpdate,
   type SessionRecord,
   type SessionSummary,
 } from "./types";
@@ -15,6 +16,7 @@ const mocks = vi.hoisted(() => {
   return {
     listeners,
     applyMeterDefaults: vi.fn(),
+    detectMeter: vi.fn(),
     exportSessionCsv: vi.fn(),
     generateReport: vi.fn(),
     getAppPaths: vi.fn(),
@@ -40,11 +42,14 @@ const mocks = vi.hoisted(() => {
     closeWindow: vi.fn(),
     confirm: vi.fn(),
     openDialog: vi.fn(),
+    saveDialog: vi.fn(),
+    openChosenPath: vi.fn(),
   };
 });
 
 vi.mock("@/integrations/tauri/meterBridge", () => ({
   applyMeterDefaults: mocks.applyMeterDefaults,
+  detectMeter: mocks.detectMeter,
   exportSessionCsv: mocks.exportSessionCsv,
   generateReport: mocks.generateReport,
   getAppPaths: mocks.getAppPaths,
@@ -71,7 +76,12 @@ vi.mock("@tauri-apps/api/window", () => ({
     onCloseRequested: mocks.onCloseRequested,
   }),
 }));
-vi.mock("@tauri-apps/plugin-dialog", () => ({ confirm: mocks.confirm, open: mocks.openDialog }));
+vi.mock("@tauri-apps/plugin-dialog", () => ({
+  confirm: mocks.confirm,
+  open: mocks.openDialog,
+  save: mocks.saveDialog,
+}));
+vi.mock("@tauri-apps/plugin-opener", () => ({ openPath: mocks.openChosenPath }));
 
 function session(overrides: Partial<SessionRecord> = {}): SessionRecord {
   return {
@@ -144,6 +154,12 @@ function emitFinished(payload: SessionSummary) {
   act(() => listener({ payload }));
 }
 
+function emitLive(payload: LiveUpdate) {
+  const listener = mocks.listeners.get("live-update");
+  if (!listener) throw new Error("live-update listener was not registered");
+  act(() => listener({ payload }));
+}
+
 beforeEach(() => {
   window.localStorage.clear();
   vi.clearAllMocks();
@@ -169,8 +185,10 @@ beforeEach(() => {
     databasePath: "C:\\data\\meter_log.db",
   });
   mocks.stopMonitor.mockResolvedValue(null);
-  mocks.generateReport.mockResolvedValue("C:\\data\\reports\\report.html");
-  mocks.exportSessionCsv.mockResolvedValue("C:\\data\\exports\\readings.csv");
+  mocks.generateReport.mockImplementation(async (_sessionId, dest) => dest);
+  mocks.exportSessionCsv.mockImplementation(async (_sessionId, dest) => dest);
+  mocks.saveDialog.mockImplementation(async (options: { defaultPath?: string }) => options.defaultPath ?? null);
+  mocks.openChosenPath.mockResolvedValue(undefined);
   mocks.previewMeterDefaults.mockResolvedValue(meterConfigPreview());
   mocks.applyMeterDefaults.mockResolvedValue({
     before: meterConfigPreview().before,
@@ -429,13 +447,16 @@ describe("pending report lifecycle", () => {
 
     expect(mocks.stopMonitor).toHaveBeenCalledTimes(1);
     expect(mocks.generateReport).toHaveBeenCalledTimes(1);
-    expect(mocks.generateReport).toHaveBeenCalledWith("run_requested");
-    expect(mocks.openPath).toHaveBeenCalledTimes(1);
-    expect(mocks.openPath).toHaveBeenCalledWith("C:\\data\\reports\\report.html");
+    expect(mocks.generateReport).toHaveBeenCalledWith(
+      "run_requested",
+      "C:\\data\\reports\\accuenergy_report_run_requested.html",
+    );
+    expect(mocks.openChosenPath).toHaveBeenCalledTimes(1);
+    expect(mocks.openChosenPath).toHaveBeenCalledWith("C:\\data\\reports\\accuenergy_report_run_requested.html");
 
     emitFinished(finishedSummary());
     expect(mocks.generateReport).toHaveBeenCalledTimes(1);
-    expect(mocks.openPath).toHaveBeenCalledTimes(1);
+    expect(mocks.openChosenPath).toHaveBeenCalledTimes(1);
   });
 
   it("clears pending intent when a null stop has no finalized matching session", async () => {
@@ -480,6 +501,48 @@ describe("pending report lifecycle", () => {
   });
 });
 
+describe("clear display", () => {
+  it("clears stale metrics and graphs after a run and then disables Clear", async () => {
+    const rendered = renderHook(() => useMeterController());
+    await waitFor(() => expect(rendered.result.current.runtime).toBe("desktop"));
+    await waitFor(() => expect(mocks.listeners.has("live-update")).toBe(true));
+
+    emitLive({
+      sessionId: "run_requested",
+      timestampMs: 1_700_000_000_000,
+      values: { ...emptyValues(), frequency_hz: 60 },
+      sampleCount: 4,
+      errorCount: 1,
+      liveHz: 1,
+      message: "60.000 Hz",
+    });
+    emitFinished({
+      sessionId: "run_requested",
+      startedAt: "2026-08-13T10:00:00-05:00",
+      endedAt: "2026-08-13T10:01:00-05:00",
+      sampleCount: 4,
+      errorCount: 1,
+      stopReason: "Stopped by user",
+      status: "stopped",
+      databasePath: "C:\\data\\meter_log.db",
+      reportPath: null,
+    });
+
+    expect(rendered.result.current.canClear).toBe(true);
+    expect(rendered.result.current.values.frequency_hz).toBe(60);
+    expect(rendered.result.current.graph.times).toHaveLength(1);
+    const portBefore = rendered.result.current.config.port;
+
+    act(() => rendered.result.current.clearDisplay());
+
+    expect(rendered.result.current.canClear).toBe(false);
+    expect(rendered.result.current.values.frequency_hz).toBeNull();
+    expect(rendered.result.current.graph.times).toEqual([]);
+    expect(rendered.result.current.sampleCount).toBe(0);
+    expect(rendered.result.current.config.port).toBe(portBefore);
+  });
+});
+
 describe("CSV export", () => {
   it("exports and opens the selected finished session", async () => {
     const finalizedSession = session({
@@ -494,12 +557,33 @@ describe("CSV export", () => {
 
     await act(async () => rendered.result.current.exportCurrentCsv());
 
-    expect(mocks.exportSessionCsv).toHaveBeenCalledWith("run_requested");
-    expect(mocks.openPath).toHaveBeenCalledWith("C:\\data\\exports\\readings.csv");
+    expect(mocks.exportSessionCsv).toHaveBeenCalledWith(
+      "run_requested",
+      "C:\\data\\exports\\accuenergy_readings_run_requested.csv",
+    );
+    expect(mocks.openChosenPath).toHaveBeenCalledWith("C:\\data\\exports\\accuenergy_readings_run_requested.csv");
     expect(rendered.result.current.notice).toMatchObject({
       tone: "success",
       title: "CSV exported",
     });
+    expect(rendered.result.current.notice?.message).toContain(".settings.json");
+  });
+
+  it("does not export when the save dialog is cancelled", async () => {
+    const finalizedSession = session({
+      endedAt: "2026-08-12T01:01:00-04:00",
+      status: "completed",
+      stopReason: "Run duration reached",
+      sampleCount: 10,
+    });
+    mocks.listSessions.mockResolvedValue([finalizedSession]);
+    mocks.saveDialog.mockResolvedValueOnce(null);
+    const rendered = renderHook(() => useMeterController());
+    await waitFor(() => expect(rendered.result.current.currentSessionId).toBe("run_requested"));
+
+    await act(async () => rendered.result.current.exportCurrentCsv());
+
+    expect(mocks.exportSessionCsv).not.toHaveBeenCalled();
   });
 });
 

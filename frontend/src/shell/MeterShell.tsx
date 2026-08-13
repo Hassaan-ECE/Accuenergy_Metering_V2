@@ -5,9 +5,11 @@ import {
   FileChartColumnIncreasing,
   FileUp,
   FolderOpen,
+  Eraser,
   Play,
   RefreshCw,
   RadioTower,
+  ScanSearch,
   SearchCheck,
   Settings2,
   Square,
@@ -183,6 +185,8 @@ export function MeterShell() {
       ? "Reading meter settings…"
       : controller.testing
         ? "Testing…"
+    : controller.detecting
+      ? "Detecting…"
     : controller.isReviewing
       ? "Review mode"
     : controller.probeStatus ??
@@ -206,6 +210,7 @@ export function MeterShell() {
         : `${statusText} · ${DEVICE_MODEL} · ${DEVICE_PROTOCOL}`);
   const controlsBusy =
     controller.testing ||
+    controller.detecting ||
     controller.reporting ||
     controller.loadingReview ||
     controller.meterConfigAction !== "idle" ||
@@ -294,7 +299,6 @@ export function MeterShell() {
         exportActions={exportActions}
         onActivityPanelToggle={() => setShowActivityPanel((current) => !current)}
         onThemeToggle={onThemeToggle}
-        runtime={controller.runtime}
         settingsActions={settingsActions}
         showActivityPanel={showActivityPanel}
         statusPulse={controller.status === "connecting"}
@@ -309,13 +313,24 @@ export function MeterShell() {
             <Play className="size-4" />
             Start
           </Button>
-          <Button disabled={!controller.isRunning || controller.status === "stopping"} onClick={controller.stop} variant="destructive">
-            <Square className="size-4" />
-            {controller.status === "stopping" ? "Stopping…" : "Stop"}
-          </Button>
+          {controller.isRunning ? (
+            <Button disabled={controller.status === "stopping"} onClick={controller.stop} variant="destructive">
+              <Square className="size-4" />
+              {controller.status === "stopping" ? "Stopping…" : "Stop"}
+            </Button>
+          ) : (
+            <Button disabled={!controller.canClear} onClick={controller.clearDisplay} variant="outline">
+              <Eraser className="size-4" />
+              Clear
+            </Button>
+          )}
           <Button disabled={controller.isRunning || controller.isReviewing || controlsBusy} onClick={controller.test} variant="outline">
             <Wifi className={controller.testing ? "size-4 animate-pulse" : "size-4"} />
             {controller.testing ? "Testing…" : "Test RS485"}
+          </Button>
+          <Button disabled={controller.isRunning || controller.isReviewing || controlsBusy} onClick={controller.detect} variant="outline">
+            <ScanSearch className={controller.detecting ? "size-4 animate-pulse" : "size-4"} />
+            {controller.detecting ? "Detecting…" : "Detect meter"}
           </Button>
           <div className="ml-auto flex items-center gap-1 rounded-lg bg-muted/70 p-1" aria-label="Visible graph groups">
             {GRAPH_MODES.map((mode) => (

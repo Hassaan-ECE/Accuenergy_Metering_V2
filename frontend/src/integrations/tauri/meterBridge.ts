@@ -3,6 +3,7 @@ import type {
   ApplyMeterDefaultsResult,
   AppConfig,
   MeterConfigPreview,
+  MeterDetectResult,
   MeterSnapshot,
   MonitorRuntimeState,
   ReviewDataset,
@@ -59,6 +60,10 @@ export function testRs485(): Promise<MeterSnapshot> {
   return invokeCommand<MeterSnapshot>("test_rs485");
 }
 
+export function detectMeter(): Promise<MeterDetectResult> {
+  return invokeCommand<MeterDetectResult>("detect_meter");
+}
+
 export function previewMeterDefaults(targetDeviceId: number, targetBaudrate: number): Promise<MeterConfigPreview> {
   return invokeCommand<MeterConfigPreview>("preview_meter_defaults", { targetDeviceId, targetBaudrate });
 }
@@ -99,12 +104,12 @@ export function loadCsvReview(path: string): Promise<ReviewDataset> {
   return invokeCommand<ReviewDataset>("load_csv_review", { path });
 }
 
-export function generateReport(sessionId: string): Promise<string> {
-  return invokeCommand<string>("generate_report", { sessionId });
+export function generateReport(sessionId: string, dest: string): Promise<string> {
+  return invokeCommand<string>("generate_report", { sessionId, dest });
 }
 
-export function exportSessionCsv(sessionId: string): Promise<string> {
-  return invokeCommand<string>("export_session_csv", { sessionId });
+export function exportSessionCsv(sessionId: string, dest: string): Promise<string> {
+  return invokeCommand<string>("export_session_csv", { sessionId, dest });
 }
 
 export function openPath(path: string): Promise<void> {

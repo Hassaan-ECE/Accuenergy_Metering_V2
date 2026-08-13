@@ -7,6 +7,7 @@ use crate::{
     domain::config::AppConfig,
     meter_config::{self, ApplyMeterDefaultsRequest, ApplyMeterDefaultsResult, MeterConfigPreview},
     meter_io::MeterSnapshot,
+    meter_scan::{self, MeterDetectResult},
     monitor::{MonitorManager, MonitorState, StartMonitorResult},
     paths::{append_app_log, AppPaths},
     report,
@@ -67,6 +68,26 @@ pub async fn test_rs485(
     })
     .await
     .map_err(|error| format!("RS485 test task failed: {error}"))
+}
+
+#[tauri::command]
+pub async fn detect_meter(
+    app: AppHandle,
+    manager: State<'_, MonitorManager>,
+) -> Result<MeterDetectResult, String> {
+    let serial_guard = manager.begin_meter_configuration()?;
+    let paths = AppPaths::resolve(&app)?;
+    let config = AppConfig::load(&paths.settings)?.normalized()?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let _serial_guard = serial_guard;
+        let result = meter_scan::detect(&config, &paths.settings);
+        if let Ok(ref detected) = result {
+            let _ = crate::paths::append_app_log(&paths.log_file, &detected.summary);
+        }
+        result
+    })
+    .await
+    .map_err(|error| format!("Meter detect task failed: {error}"))?
 }
 
 #[tauri::command]
@@ -156,9 +177,14 @@ pub fn recover_orphaned_sessions(
 }
 
 #[tauri::command]
-pub async fn generate_report(app: AppHandle, session_id: String) -> Result<String, String> {
+pub async fn generate_report(
+    app: AppHandle,
+    session_id: String,
+    dest: String,
+) -> Result<String, String> {
     let paths = AppPaths::resolve(&app)?;
-    tauri::async_runtime::spawn_blocking(move || report::generate(&paths, &session_id))
+    let dest = PathBuf::from(dest);
+    tauri::async_runtime::spawn_blocking(move || report::generate(&paths, &session_id, Some(&dest)))
         .await
         .map_err(|error| format!("Report task failed: {error}"))?
         .map(|path| path.to_string_lossy().into_owned())
@@ -196,10 +222,17 @@ pub async fn load_csv_review(path: String) -> Result<ReviewDataset, String> {
 }
 
 #[tauri::command]
-pub async fn export_session_csv(app: AppHandle, session_id: String) -> Result<String, String> {
+pub async fn export_session_csv(
+    app: AppHandle,
+    session_id: String,
+    dest: String,
+) -> Result<String, String> {
     let paths = AppPaths::resolve(&app)?;
-    tauri::async_runtime::spawn_blocking(move || report::export_csv(&paths, &session_id))
-        .await
+    let dest = PathBuf::from(dest);
+    tauri::async_runtime::spawn_blocking(move || {
+        report::export_csv(&paths, &session_id, Some(&dest))
+    })
+    .await
         .map_err(|error| format!("CSV export task failed: {error}"))?
         .map(|path| path.to_string_lossy().into_owned())
 }
