@@ -1,7 +1,7 @@
 # Implementation decisions
 
 **Date:** August 11, 2026  
-**Updated:** August 12, 2026
+**Updated:** August 13, 2026
 **Version:** 0.1.0
 
 ## Success criteria used
@@ -77,8 +77,18 @@ The implementation is considered software-complete when the persisted settings, 
 - Write best-effort operational messages to `%LOCALAPPDATA%\com.accuenergy.metering\logs\app.log` and rotate one backup after 5 MB; log I/O failures do not fail monitoring.
 - Use a full-width first plot for the three-graph layout. No uPlot axis values were changed because rendered clipping could not be inspected from the unattended CLI.
 
+## LiveGraph wrap-up pass (2026-08-13)
+
+- Preserve the denser Inventory-style shell, compact header menus, graph tiling, and uPlot zoom/pan work from the lab UI pass.
+- When a plot is zoomed, update uPlot with `setData(data, false)` and immediately call `redraw()` because this bundled uPlot version does not commit that path itself.
+- Treat the X view as zoomed only when it is meaningfully smaller than the data extent. Require a six-pixel drag deadzone, clear the latch at full extent, and make Reset/double-click auto-range both X and Y.
+- Use explicit live/review dataset identity plus timestamp extent transitions so Start, entering review, exiting review, and empty-to-first-sample transitions clear zoom without disrupting normal live appends or a sliding 1,800-point buffer.
+- Keep hidden-series state derived from the active series signature, and cap zero-size mount retries while retaining `ResizeObserver` recovery.
+- Restore a compact Desktop/Demo/Connecting badge and `v0.1.0` cue in the header. Keep CSV loading in the download menu and label it `Export & load`.
+
 ## Verification boundary
 
+- The LiveGraph wrap-up passed frontend lint, all 34 Vitest cases, and the production frontend build on August 13, 2026.
 - Frontend lint/tests/build and Rust formatting/tests/clippy succeeded on August 12, 2026: 25 Vitest tests and 35 Rust tests passed.
 - A duplicate desktop launch was not forced because this workspace already had its Vite server on port 5173 and `accuenergy-metering.exe` running; the existing owner processes were left untouched. The prior full Tauri launch remains the desktop verification boundary.
 - Windows reported no attached serial ports during verification. No live Modbus, meter response, real sample stream, or hardware-generated report is claimed.

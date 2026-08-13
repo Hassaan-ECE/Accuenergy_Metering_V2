@@ -5,8 +5,6 @@ import {
   FileChartColumnIncreasing,
   FileUp,
   FolderOpen,
-  PanelRightClose,
-  PanelRightOpen,
   Play,
   RefreshCw,
   RadioTower,
@@ -29,6 +27,7 @@ import { Button } from "@/shared/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/shared/components/ui/card";
 import { cn } from "@/shared/lib/utils";
 
+import type { HeaderMenuAction } from "./HeaderMenus";
 import { ShellHeader } from "./ShellHeader";
 import { ShellStatusStrip } from "./ShellStatusStrip";
 
@@ -49,13 +48,13 @@ const GRAPH_PRESETS: Record<
 > = {
   frequency: {
     label: "Frequency",
-    title: "Frequency vs time",
+    title: "Frequency",
     unit: "Hz",
     keys: [{ key: "frequency_hz", label: "Frequency", color: "#2563eb" }],
   },
   voltage: {
     label: "Voltage",
-    title: "Voltage vs time",
+    title: "Voltage",
     unit: "V",
     keys: [
       { key: "phase_voltage_v1", label: "V1", color: "#2563eb" },
@@ -66,7 +65,7 @@ const GRAPH_PRESETS: Record<
   },
   current: {
     label: "Current",
-    title: "Current vs time",
+    title: "Current",
     unit: "A",
     keys: [
       { key: "current_i1", label: "I1", color: "#2563eb" },
@@ -154,6 +153,9 @@ export function MeterShell() {
     [controller.graph.series, visibleGraphs],
   );
   const summary = useMemo(() => configSummary(controller.config), [controller.config]);
+  const graphDatasetId = controller.review
+    ? `review:${controller.review.source}:${controller.review.sourceLabel}:${controller.review.session.sessionId}`
+    : `${controller.runtime}:live`;
 
   const onThemeToggle = () => {
     const next: AppConfig["themeName"] = theme === "light" ? "dark" : "light";
@@ -221,17 +223,88 @@ export function MeterShell() {
     setMeterConfigOpen(false);
   };
 
+  const exportActions: HeaderMenuAction[] = [
+    {
+      label: controller.exportingSessionId ? "Exporting…" : "Export CSV",
+      icon: <Download className="size-4" />,
+      disabled: controller.exportingSessionId !== null || controller.runtime !== "desktop",
+      onClick: () => {
+        void controller.exportCurrentCsv();
+      },
+    },
+    {
+      label: controller.reporting ? "Generating…" : "Generate report",
+      icon: <FileChartColumnIncreasing className="size-4" />,
+      disabled: controller.reporting || controller.runtime !== "desktop",
+      onClick: () => {
+        void controller.openReport();
+      },
+    },
+    {
+      label: controller.loadingReview ? "Loading…" : "Load CSV",
+      icon: <FileUp className="size-4" />,
+      disabled: controller.isRunning || controller.loadingReview || controller.runtime !== "desktop",
+      onClick: () => {
+        void controller.loadReviewCsv();
+      },
+      separatorBefore: true,
+    },
+  ];
+
+  const settingsActions: HeaderMenuAction[] = [
+    {
+      label: "Meter settings…",
+      icon: <Settings2 className="size-4" />,
+      disabled: controller.isRunning || controlsBusy,
+      onClick: () => setSettingsOpen(true),
+    },
+    {
+      label: "Configure meter…",
+      icon: <RadioTower className="size-4" />,
+      disabled:
+        controller.isRunning ||
+        controller.isReviewing ||
+        controlsBusy ||
+        controller.runtime !== "desktop",
+      onClick: openMeterConfig,
+    },
+    {
+      label: "Open app data",
+      icon: <Database className="size-4" />,
+      disabled: controller.runtime !== "desktop",
+      onClick: () => {
+        void controller.openDataPath(controller.paths?.root);
+      },
+      separatorBefore: true,
+    },
+    {
+      label: "Open reports folder",
+      icon: <FolderOpen className="size-4" />,
+      disabled: controller.runtime !== "desktop",
+      onClick: () => {
+        void controller.openDataPath(controller.paths?.reports);
+      },
+    },
+  ];
+
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-background text-foreground">
       <ShellHeader
         configSummary={summary}
+        exportActions={exportActions}
+        onActivityPanelToggle={() => setShowActivityPanel((current) => !current)}
         onThemeToggle={onThemeToggle}
         runtime={controller.runtime}
+        settingsActions={settingsActions}
+        showActivityPanel={showActivityPanel}
+        statusPulse={controller.status === "connecting"}
+        statusText={statusText}
+        statusTone={statusTone}
         theme={theme}
       />
 
-      <main className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden px-3 py-3 sm:px-4">
-        <section className="flex shrink-0 flex-wrap items-center gap-2 rounded-xl border border-border bg-card px-3 py-2 shadow-sm">
+      <main className="flex min-h-0 flex-1 flex-col gap-2 overflow-hidden px-2 py-2 sm:px-3">
+        <section className="flex shrink-0 flex-wrap items-center gap-1.5 rounded-xl border border-border bg-card px-2 py-1.5 shadow-sm">
           <Button disabled={controller.isRunning || controller.isReviewing || controlsBusy} onClick={controller.start} variant="default">
             <Play className="size-4" />
             Start
@@ -244,41 +317,7 @@ export function MeterShell() {
             <Wifi className={controller.testing ? "size-4 animate-pulse" : "size-4"} />
             {controller.testing ? "Testing…" : "Test RS485"}
           </Button>
-          <Button
-            disabled={controller.isRunning || controller.isReviewing || controlsBusy || controller.runtime !== "desktop"}
-            onClick={openMeterConfig}
-            variant="outline"
-          >
-            <RadioTower className="size-4" />
-            Configure meter…
-          </Button>
-          <Button disabled={controller.isRunning || controlsBusy} onClick={() => setSettingsOpen(true)} variant="outline">
-            <Settings2 className="size-4" />
-            Settings
-          </Button>
-          <Button disabled={controller.reporting || controller.runtime !== "desktop"} onClick={controller.openReport} variant="outline">
-            <FileChartColumnIncreasing className="size-4" />
-            {controller.reporting ? "Generating…" : "Generate Report"}
-          </Button>
-          <Button
-            disabled={controller.exportingSessionId !== null || controller.runtime !== "desktop"}
-            onClick={controller.exportCurrentCsv}
-            variant="outline"
-          >
-            <Download className="size-4" />
-            {controller.exportingSessionId ? "Exporting…" : "Export CSV"}
-          </Button>
-          <Button
-            disabled={controller.isRunning || controller.loadingReview || controller.runtime !== "desktop"}
-            onClick={controller.loadReviewCsv}
-            variant="outline"
-          >
-            <FileUp className="size-4" />
-            {controller.loadingReview ? "Loading…" : "Load CSV"}
-          </Button>
-          <div className="mx-1 hidden h-6 w-px bg-border lg:block" />
-          <div className="flex items-center gap-1 rounded-lg bg-muted/70 p-1" aria-label="Visible graph groups">
-            <span className="px-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Graphs</span>
+          <div className="ml-auto flex items-center gap-1 rounded-lg bg-muted/70 p-1" aria-label="Visible graph groups">
             {GRAPH_MODES.map((mode) => (
               <button
                 aria-pressed={visibleGraphs.includes(mode)}
@@ -296,57 +335,10 @@ export function MeterShell() {
               </button>
             ))}
           </div>
-          <Button
-            aria-pressed={showActivityPanel}
-            onClick={() => setShowActivityPanel((current) => !current)}
-            size="sm"
-            variant={showActivityPanel ? "secondary" : "ghost"}
-          >
-            {showActivityPanel ? <PanelRightClose className="size-4" /> : <PanelRightOpen className="size-4" />}
-            Log & sessions
-          </Button>
-          <div className="mx-1 hidden h-6 w-px bg-border xl:block" />
-          <Button
-            disabled={controller.runtime !== "desktop"}
-            onClick={() => controller.openDataPath(controller.paths?.root)}
-            size="sm"
-            variant="ghost"
-          >
-            <Database className="size-4" />
-            App Data
-          </Button>
-          <Button
-            disabled={controller.runtime !== "desktop"}
-            onClick={() => controller.openDataPath(controller.paths?.reports)}
-            size="sm"
-            variant="ghost"
-          >
-            <FolderOpen className="size-4" />
-            Reports
-          </Button>
-          <div
-            className={cn(
-              "ml-auto flex items-center gap-2 rounded-full border px-2.5 py-1 text-xs font-medium",
-              statusTone === "ok" && "border-success/30 bg-success/10 text-success-foreground",
-              statusTone === "error" && "border-destructive/30 bg-destructive/10 text-destructive-foreground",
-              statusTone === "normal" && "border-border bg-muted/50 text-muted-foreground",
-            )}
-          >
-            <span
-              className={cn(
-                "size-2 rounded-full",
-                statusTone === "ok" && "bg-success",
-                statusTone === "error" && "bg-destructive",
-                statusTone === "normal" && "bg-muted-foreground/60",
-                controller.status === "connecting" && "animate-pulse",
-              )}
-            />
-            {statusText}
-          </div>
         </section>
 
         {controller.review ? (
-          <section className="flex shrink-0 items-center gap-3 rounded-xl border border-primary/25 bg-primary/8 px-3 py-2 shadow-sm">
+          <section className="flex shrink-0 items-center gap-2 rounded-xl border border-primary/25 bg-primary/8 px-2 py-1.5 shadow-sm">
             <SearchCheck className="size-5 shrink-0 text-primary" />
             <div className="min-w-0 flex-1">
               <p className="truncate text-sm font-semibold">
@@ -366,7 +358,7 @@ export function MeterShell() {
           </section>
         ) : null}
 
-        <section className="grid shrink-0 grid-cols-2 gap-2 sm:grid-cols-4 md:grid-cols-7">
+        <section className="grid shrink-0 grid-cols-2 gap-1.5 sm:grid-cols-4 md:grid-cols-7">
           <MetricCard label="Frequency" large unit="Hz" value={controller.values.frequency_hz} />
           <MetricCard label="V1" unit="V" value={controller.values.phase_voltage_v1} />
           <MetricCard label="V2" unit="V" value={controller.values.phase_voltage_v2} />
@@ -385,59 +377,55 @@ export function MeterShell() {
 
         <section
           className={cn(
-            "grid min-h-0 flex-1 gap-3 overflow-hidden",
-            showActivityPanel && "md:grid-cols-[minmax(0,1.55fr)_minmax(330px,0.85fr)]",
+            "grid min-h-0 flex-1 gap-2 overflow-hidden",
+            showActivityPanel && "md:grid-cols-[minmax(0,1.55fr)_minmax(300px,0.85fr)]",
           )}
         >
-          <Card className="flex min-h-0 flex-col overflow-hidden">
-            <CardHeader className="shrink-0 gap-2 pb-0">
-              <div className="flex items-center justify-between gap-2">
-                <CardTitle>{controller.isReviewing ? "Review graphs" : "Live graphs"}</CardTitle>
-                <span className="text-[11px] text-muted-foreground">
-                  {graphCards.length} group{graphCards.length === 1 ? "" : "s"} · aligned time window
-                </span>
-              </div>
-            </CardHeader>
-            <CardContent className="min-h-0 flex-1 overflow-hidden pb-3 pt-2">
-              <div
+          <div
+            className={cn(
+              "grid min-h-0 h-full overflow-hidden",
+              graphCards.length <= 2 ? "grid-cols-1" : "grid-cols-2",
+              graphCards.length > 1 && "gap-2",
+            )}
+            style={{
+              gridTemplateRows: `repeat(${
+                graphCards.length <= 2 ? graphCards.length : Math.ceil(graphCards.length / 2)
+              }, minmax(0, 1fr))`,
+            }}
+          >
+            {graphCards.map(({ lines, mode, preset }, index) => (
+              <Card
                 className={cn(
-                  "grid h-full min-h-0 gap-2 overflow-hidden",
-                  graphCards.length === 1 ? "grid-cols-1" : "grid-cols-2",
+                  "flex min-h-0 flex-col overflow-hidden p-0",
+                  graphCards.length === 3 && index === 0 && "col-span-2",
                 )}
-                style={{ gridTemplateRows: `repeat(${Math.ceil(graphCards.length / 2)}, minmax(0, 1fr))` }}
+                key={mode}
               >
-                {graphCards.map(({ lines, mode, preset }, index) => (
-                  <div
-                    className={cn(
-                      "min-h-0 overflow-hidden rounded-lg border border-border bg-muted/15 p-1.5",
-                      graphCards.length === 3 && index === 0 && "col-span-2",
-                    )}
-                    key={mode}
-                  >
-                    <LiveGraph
-                      lines={lines}
-                      secondaryUnit={preset.secondaryUnit}
-                      theme={theme}
-                      times={controller.graph.times}
-                      title={preset.title}
-                      unit={preset.unit}
-                    />
-                  </div>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
+                <CardContent className="min-h-0 flex-1 overflow-hidden p-0">
+                  <LiveGraph
+                    datasetId={graphDatasetId}
+                    lines={lines}
+                    secondaryUnit={preset.secondaryUnit}
+                    theme={theme}
+                    times={controller.graph.times}
+                    title={preset.title}
+                    unit={preset.unit}
+                  />
+                </CardContent>
+              </Card>
+            ))}
+          </div>
 
           {showActivityPanel ? <Card className="flex min-h-0 flex-col overflow-hidden">
-            <CardHeader className="shrink-0 gap-3 pb-0">
+            <CardHeader className="shrink-0 gap-2 px-3 pt-3 pb-0">
               <SessionInfo
                 databasePath={controller.paths?.database ?? null}
                 reportPath={controller.lastReportPath}
                 session={controller.latestSession}
                 sessionId={controller.currentSessionId}
               />
-              <div className="flex items-center justify-between border-t border-border pt-2">
-                <div className="flex gap-1 rounded-lg bg-muted/70 p-1">
+              <div className="flex items-center justify-between border-t border-border pt-1.5">
+                <div className="flex gap-1 rounded-lg bg-muted/70 p-0.5">
                   <TabButton active={sideTab === "activity"} label="Activity" onClick={() => setSideTab("activity")} />
                   <TabButton active={sideTab === "sessions"} label={`Sessions (${controller.sessions.length})`} onClick={() => setSideTab("sessions")} />
                 </div>
@@ -448,7 +436,7 @@ export function MeterShell() {
                 ) : null}
               </div>
             </CardHeader>
-            <CardContent className="min-h-0 flex-1 overflow-auto pt-2">
+            <CardContent className="min-h-0 flex-1 overflow-auto px-3 py-2">
               {sideTab === "activity" ? (
                 <ul className="space-y-1.5 font-mono text-[11px] leading-relaxed text-muted-foreground">
                   {controller.logLines.map((line, index) => (
@@ -510,7 +498,7 @@ function SessionInfo({
   sessionId: string | null;
 }) {
   return (
-    <div className="space-y-1.5">
+    <div className="space-y-1">
       <CardTitle>Session workspace</CardTitle>
       <InfoRow label="Session" value={sessionId ?? "No completed run yet"} />
       <InfoRow label="Database" value={databasePath ?? "Desktop backend not connected"} />
@@ -566,14 +554,14 @@ function SessionList({
   sessions: SessionRecord[];
 }) {
   if (!sessions.length) {
-    return <p className="rounded-lg border border-dashed border-border p-4 text-center text-sm text-muted-foreground">No sessions recorded yet.</p>;
+    return <p className="rounded-lg border border-dashed border-border p-3 text-center text-sm text-muted-foreground">No sessions recorded yet.</p>;
   }
   return (
-    <div className="space-y-2">
+    <div className="space-y-1.5">
       {sessions.map((session) => {
         const finalized = session.status !== "running" && session.endedAt !== null && session.sampleCount > 0;
         return (
-          <div className="rounded-xl border border-border bg-muted/30 p-3" key={session.sessionId}>
+          <div className="rounded-lg border border-border bg-muted/30 p-2" key={session.sessionId}>
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0">
                 <p className="truncate font-mono text-xs font-semibold" title={session.sessionId}>{session.sessionId}</p>

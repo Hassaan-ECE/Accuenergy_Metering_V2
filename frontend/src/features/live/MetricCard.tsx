@@ -23,20 +23,20 @@ export function MetricCard({
     (value === null || value === undefined ? (status === "error" ? "ERR" : "—") : formatMetric(value));
 
   return (
-    <div className="rounded-xl border border-border bg-muted/40 px-3 py-2.5">
-      <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{label}</div>
-      <div className="mt-0.5 flex items-baseline gap-1.5">
+    <div className="rounded-lg border border-border bg-muted/40 px-2 py-1.5">
+      <div className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{label}</div>
+      <div className="mt-0.5 flex items-baseline gap-1">
         <span
           className={cn(
             "font-semibold tabular-nums tracking-tight",
-            large ? "text-2xl" : "text-xl",
+            large ? "text-xl" : "text-lg",
             status === "error" && "text-destructive-foreground",
             status === "ok" && "text-success-foreground",
           )}
         >
           {display}
         </span>
-        {unit ? <span className="text-xs font-medium text-muted-foreground">{unit}</span> : null}
+        {unit ? <span className="text-[11px] font-medium text-muted-foreground">{unit}</span> : null}
       </div>
     </div>
   );
