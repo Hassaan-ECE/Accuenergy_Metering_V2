@@ -22,7 +22,7 @@ UI/release conventions: mirror `Inventory_Management` (not its domain).
 | Item | Value |
 |------|--------|
 | Name | Accuenergy Metering |
-| Package | `accuenergy-metering` `0.1.0` |
+| Package | `accuenergy-metering` `0.1.1` |
 | Tauri id | `com.accuenergy.metering` |
 | Local data | `%LOCALAPPDATA%\com.accuenergy.metering\` |
 

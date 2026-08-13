@@ -23,7 +23,7 @@ This is a ground-up port of the older Python/PySide6 project to:
 - [Implementation decisions](docs/DECISIONS.md)
 - [Agent notes](AGENTS.md)
 
-## Status (0.1.0)
+## Status (0.1.1)
 
 The software port is feature-complete against the required legacy workflow:
 
@@ -33,6 +33,7 @@ The software port is feature-complete against the required legacy workflow:
 - Tauri live events feeding metric cards, activity log, and uPlot charts
 - Session history, self-contained HTML reports, and CSV export
 - Light/dark Inventory-style UI and close-while-running protection
+- Window close works when idle; Detect tells you if the FTDI VCP driver is missing
 
 **Hardware status:** the desktop app builds and launches, but no serial ports were attached during the final verification on August 11, 2026. Live Acuvim/RS485 communication is therefore not claimed as hardware-verified.
 

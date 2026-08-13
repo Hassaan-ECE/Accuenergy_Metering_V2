@@ -115,6 +115,8 @@ export function useMeterController() {
   const runningRef = useRef(false);
   const startingRef = useRef(false);
   const meterConfigActionRef = useRef<"idle" | "preview" | "apply">("idle");
+  const testingRef = useRef(false);
+  const detectingRef = useRef(false);
   const allowCloseRef = useRef(false);
   const monitorEndWaiters = useRef(new Set<() => void>());
 
@@ -219,6 +221,14 @@ export function useMeterController() {
   useEffect(() => {
     meterConfigActionRef.current = meterConfigAction;
   }, [meterConfigAction]);
+
+  useEffect(() => {
+    testingRef.current = testing;
+  }, [testing]);
+
+  useEffect(() => {
+    detectingRef.current = detecting;
+  }, [detecting]);
 
   useEffect(() => {
     let cancelled = false;
@@ -440,40 +450,47 @@ export function useMeterController() {
     let cancelled = false;
     let unlisten: (() => void) | undefined;
     void (async () => {
-      const [{ getCurrentWindow }, { confirm }] = await Promise.all([
-        import("@tauri-apps/api/window"),
-        import("@tauri-apps/plugin-dialog"),
-      ]);
+      const { getCurrentWindow } = await import("@tauri-apps/api/window");
       const currentWindow = getCurrentWindow();
-      const nextUnlisten = await currentWindow.onCloseRequested(async (event) => {
+      const nextUnlisten = await currentWindow.onCloseRequested((event) => {
         if (allowCloseRef.current) return;
-        if (meterConfigActionRef.current !== "idle") {
+        if (meterConfigActionRef.current !== "idle" || testingRef.current || detectingRef.current) {
           event.preventDefault();
           showNotice(
             "warning",
-            "Meter configuration in progress",
-            "Wait for the serial read, write, and verification step to finish before closing the app.",
+            "Serial operation in progress",
+            "Wait for Test, Detect, or meter configuration to finish, then close.",
           );
           return;
         }
         if (!runningRef.current) return;
+
+        // preventDefault must stay synchronous. Confirm/stop run after that.
         event.preventDefault();
-        const confirmed = await confirm("Monitoring is still running. Stop it and exit?", {
-          title: "Accuenergy Metering",
-          kind: "warning",
-          okLabel: "Stop and exit",
-          cancelLabel: "Keep running",
-        });
-        if (!confirmed) return;
-        const waitForEnd = new Promise<void>((resolve) => {
-          monitorEndWaiters.current.add(resolve);
-          const readWaitMs = config.timeoutSeconds * (config.retries + 1) * 1_000;
-          window.setTimeout(resolve, Math.min(120_000, Math.max(7_000, readWaitMs + 5_000)));
-        });
-        await stop();
-        await waitForEnd;
-        allowCloseRef.current = true;
-        await currentWindow.close();
+        void (async () => {
+          let confirmed = true;
+          try {
+            const { confirm } = await import("@tauri-apps/plugin-dialog");
+            confirmed = await confirm("Monitoring is still running. Stop it and exit?", {
+              title: "Accuenergy Metering",
+              kind: "warning",
+              okLabel: "Stop and exit",
+              cancelLabel: "Keep running",
+            });
+          } catch {
+            confirmed = true;
+          }
+          if (!confirmed) return;
+          const waitForEnd = new Promise<void>((resolve) => {
+            monitorEndWaiters.current.add(resolve);
+            const readWaitMs = config.timeoutSeconds * (config.retries + 1) * 1_000;
+            window.setTimeout(resolve, Math.min(20_000, Math.max(3_000, readWaitMs + 2_000)));
+          });
+          await stop();
+          await waitForEnd;
+          allowCloseRef.current = true;
+          await currentWindow.close();
+        })();
       });
       if (cancelled) nextUnlisten();
       else unlisten = nextUnlisten;
@@ -534,7 +551,11 @@ export function useMeterController() {
       setProbeStatus(result.found ? "RS485 OK" : "No reply");
       showNotice(
         result.found ? "success" : "warning",
-        result.found ? "Meter detected" : "No meter found",
+        result.found
+          ? "Meter detected"
+          : result.summary.includes("CDM21228")
+            ? "Serial driver may be required"
+            : "No meter found",
         result.found
           ? `Using ${result.config?.port ?? "the current port"}, device ${result.config?.deviceId ?? "?"}, ${result.config?.baudrate ?? "?"} baud.`
           : result.summary,

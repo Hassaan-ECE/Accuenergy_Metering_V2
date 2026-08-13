@@ -2,7 +2,7 @@
 
 **Date:** August 11, 2026  
 **Updated:** August 13, 2026
-**Version:** 0.1.0
+**Version:** 0.1.1
 
 ## Success criteria used
 
@@ -99,6 +99,8 @@ The implementation is considered software-complete when the persisted settings, 
 - Scan order: every detected COM port (Settings port first, then Windows-enumerated ports), current serial parameters with IDs 1–10 (current ID first), then common bauds at 8N1, then a smaller E/O and 2-stop pass. Timeout is 0.3 s with no retries. A port that will not open is skipped; the rest of the scan continues.
 - When a serial combo replies, remaining IDs are scanned at that combo only. If several IDs answer (daisy chain), keep the current device ID when it replied; otherwise use the lowest ID. App settings are saved only after a hit.
 - Detect uses the same exclusive serial guard as Test/configure and is disabled while monitoring.
+- If Windows lists no COM ports, Detect reports that the FTDI VCP driver may be required (Code 28) and points at the S: `CDM21228_Setup.exe`. When USB enum shows VID_0403/FTDIBUS without a COM port, the message says the adapter is present but has no COMx.
+- Window close is allowed immediately when idle. The close handler is synchronous unless a monitor is running; a failed confirm dialog cannot trap the window.
 
 ## Verification boundary
 
@@ -107,4 +109,4 @@ The implementation is considered software-complete when the persisted settings, 
 - A duplicate desktop launch was not forced because this workspace already had its Vite server on port 5173 and `accuenergy-metering.exe` running; the existing owner processes were left untouched. The prior full Tauri launch remains the desktop verification boundary.
 - Windows reported no attached serial ports during verification. No live Modbus, meter response, real sample stream, or hardware-generated report is claimed.
 - Abrupt process termination or power loss can temporarily leave the latest session marked `running`; committed WAL readings remain available and the next idle desktop initialization finalizes the orphan. Normal UI close is intercepted and waits for the implemented stop/finalize path.
-- Team install root is `S:\Engineering\Public\Syed_Hassaan_Shah\Accuenergy_Metering_V2\` (created 2026-08-13). The sibling `Accuenergy_Metering\` folder stays the legacy Python drop and FTDI VCP drivers. No V2 installer is staged there until a signed 0.1.0 NSIS is built.
+- Team install root is `S:\Engineering\Public\Syed_Hassaan_Shah\Accuenergy_Metering_V2\`. Current signed installer is 0.1.1 (close-while-idle fix + Detect driver hint). The sibling `Accuenergy_Metering\` folder stays the legacy Python drop; FTDI VCP drivers live under the V2 share `drivers\FTDI_VCP\`.

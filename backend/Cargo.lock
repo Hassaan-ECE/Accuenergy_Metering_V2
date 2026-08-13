@@ -4,7 +4,7 @@ version = 4
 
 [[package]]
 name = "accuenergy-metering"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "chrono",
  "csv",
@@ -21,6 +21,7 @@ dependencies = [
  "thiserror 2.0.20",
  "tokio-modbus",
  "tokio-serial",
+ "winreg",
 ]
 
 [[package]]

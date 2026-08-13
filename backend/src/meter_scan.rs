@@ -11,6 +11,8 @@ const SCAN_ADDRESS: u16 = 0x4000;
 const SCAN_COUNT: u16 = 2;
 const LAB_DEVICE_IDS: [u8; 10] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
 const COMMON_BAUDS: [u32; 5] = [19_200, 9_600, 38_400, 4_800, 115_200];
+const FTDI_DRIVER_PATH: &str =
+    r"S:\Engineering\Public\Syed_Hassaan_Shah\Accuenergy_Metering_V2\drivers\FTDI_VCP\CDM21228_Setup.exe";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ScanCandidate {
@@ -45,10 +47,13 @@ pub struct MeterDetectResult {
 pub fn detect(current: &AppConfig, settings_path: &Path) -> Result<MeterDetectResult, String> {
     let ports = discover_ports(&current.port);
     if ports.is_empty() {
-        return Err(
-            "No serial ports were detected. Plug in the USB–RS485 adapter and try Detect again."
-                .into(),
-        );
+        return Ok(MeterDetectResult {
+            found: false,
+            attempts: 0,
+            hits: Vec::new(),
+            config: None,
+            summary: no_com_ports_message(ftdi_adapter_present()),
+        });
     }
 
     let mut check = current.clone();
@@ -254,6 +259,43 @@ fn scan_config(current: &AppConfig, candidate: &ScanCandidate) -> AppConfig {
     }
 }
 
+pub fn no_com_ports_message(ftdi_present: bool) -> String {
+    let driver = format!(
+        "Install the FTDI VCP driver (Device Manager: FT232R / Code 28, no COMx).\nRun as Administrator:\n{FTDI_DRIVER_PATH}\nThen plug the adapter back in and click Detect meter again."
+    );
+    if ftdi_present {
+        format!(
+            "[FAIL] An FTDI USB–RS485 adapter is plugged in, but Windows has no COM port for it.\n{driver}"
+        )
+    } else {
+        format!(
+            "[FAIL] No COM ports found. Plug in the USB–RS485 adapter. If it is already plugged in, Windows likely needs the driver.\n{driver}"
+        )
+    }
+}
+
+#[cfg(windows)]
+pub fn ftdi_adapter_present() -> bool {
+    ftdi_enum_present(r"SYSTEM\CurrentControlSet\Enum\USB")
+        || ftdi_enum_present(r"SYSTEM\CurrentControlSet\Enum\FTDIBUS")
+}
+
+#[cfg(not(windows))]
+pub fn ftdi_adapter_present() -> bool {
+    false
+}
+
+#[cfg(windows)]
+fn ftdi_enum_present(path: &str) -> bool {
+    let Ok(root) = winreg::RegKey::predef(winreg::enums::HKEY_LOCAL_MACHINE).open_subkey(path) else {
+        return false;
+    };
+    root.enum_keys().flatten().any(|name| {
+        let upper = name.to_ascii_uppercase();
+        upper.contains("VID_0403") || upper.contains("FTDIBUS") || upper.contains("FT232")
+    })
+}
+
 fn ports_equal(left: &str, right: &str) -> bool {
     left.trim().eq_ignore_ascii_case(right.trim())
 }
@@ -374,5 +416,18 @@ mod tests {
         assert_eq!(choose_hit("COM3", 2, &hits).unwrap().device_id, 2);
         assert_eq!(choose_hit("COM3", 9, &hits).unwrap().device_id, 1);
         assert_eq!(choose_hit("COM8", 2, &hits).unwrap().device_id, 2);
+    }
+
+    #[test]
+    fn no_com_message_tells_the_operator_to_install_ftdi() {
+        let with_device = no_com_ports_message(true);
+        assert!(with_device.contains("FTDI"));
+        assert!(with_device.contains("Code 28"));
+        assert!(with_device.contains("CDM21228_Setup.exe"));
+        assert!(with_device.contains("no COM port"));
+
+        let without_device = no_com_ports_message(false);
+        assert!(without_device.contains("No COM ports found"));
+        assert!(without_device.contains("CDM21228_Setup.exe"));
     }
 }
